@@ -38,7 +38,10 @@ def make_tri(name, p0, p1, p2):
 # ==========================================================
 stem = make_plane("To", 0, 0, 4 * W, STEM_LEN)
 
-for i in range(3):
+# Csik_1 (SZURKE) es Csik_2 (KEK) marad EGYENES, allo szal.
+# Csik_3 (ZOLD) NEM egyenes tobbe: a pirossal ANALOG modon LEHAJLIK (lasd lentebb),
+# ezert itt NEM hozzuk letre allo szalkent.
+for i in range(2):
     s = make_plane(f"Csik_{i+1}", i * W, STEM_LEN, (i + 1) * W, TOTAL_LEN)
     s.parent = stem
 
@@ -334,9 +337,7 @@ base_key = strip4.shape_key_add(name="Alap_kisimul", from_mix=False)
 if anchor_idx is not None:
     base_key.data[anchor_idx].co = (STRIP_X0 + W, CREASE_Y - ALAP_PULL, -ALAP_LIFT)
 
-print(f"OrIAS hurok: magassag ~{PEAK_Z:.2f} cm; kulso ele (reach) -> vilag-X "
-      f"{CORNER_X - max(_yint):.2f} (cel {LOOP_REACH_X:.2f}); tip -> vilag-X {CORNER_X - CHORD:.2f}; "
-      f"PHI_MAX={PHI_MAX:.3f}.")
+# (A hurok-geometria valtozok kiszamitva maradnak, de a hurkot mar nem animaljuk.)
 
 # ==========================================================
 # Allo talp-haromszog: a crease ALATTI resz.  Kap egy "kisimulo" alak-kulcsot
@@ -354,13 +355,11 @@ talp_key.data[0].co = (STRIP_X0 + W, STEM_LEN, 0.0)   # (4.5,6) -> (6,6): a crea
 
 # ==========================================================
 # Anim:
-#   1) HAJTAS         0->180 fok                                (frame  1-20)
-#   2) FOLE EMELKEDES a flap a 3 szal foler pihen                (frame 20-28)
-#   3) MASSZIV HUROK  a felulnezeti hossz csaknem NULLARA huzodik,
-#      az anyag egy magas, csaknem fuggoleges hurokba megy;
-#      kozben a bazis-haromszog IDEIGLENESEN felolodik/kisimul   (frame 28-64)
-#   4) BECSUSSZANAS   a hurok elenged, az anyag "kifizetodik" a
-#      fonasba (kozeltol tavolig), a haromszog visszaall         (frame 64-96)
+#   1) HAJTAS      0->180 fok, a szal lehajlik a 3 szalra          (frame  1-20)
+#   2) BEFONODAS   a szal LAPOSAN fekve a helyen befonodik: a
+#      helyzet-fuggo GN modosito lagyan behozza az ala/fole
+#      retegzodest (ZOLD fole, KEK ala, SZURKE fole)               (frame 20-44)
+#   -- utana allo, kesz fonas; a szal vege LAPOS. NINCS hurok.
 #
 # Nyujthatatlansag: a behuzas a magassag NEGYZETEVEL aranyos, ezert
 #   Hurok_Z ertek = q,   Hurok_XY ertek = q^2.
@@ -392,67 +391,25 @@ def key_anim(shape_key, frames_values):
         shape_key.value = v
         shape_key.keyframe_insert(data_path="value", frame=f)
 
-# --- 2) Nyugalmi emeles ---
-key_anim(rest_key, [(FOLD_END, 0.0), (28, 1.0), (52, 1.0), (84, 0.0)])
-
-# --- 3) Hurok q-palya:  Hurok_Z = q,  Hurok_XY = q^2 ---
+# ==========================================================
+# NINCS HUROK: a szal LAPOSAN fekszik es a helyen fonodik be.
 #
-# FELSZALLAS (20->64): a magassag (Z) es a behuzas (XY) KAPCSOLT, XY = Z^2
-# (nyujthatatlansag) -> a hurok fizikailag helyesen boltosul fel.
+# Korabban a lehajtott szal egy magas fuggoleges HUROKBA boltosult, mielott
+# becsusszott a fonasba.  A hurok viszont a szalat a szomszedok FOLE emelte
+# (a hurok magassaga ~1.8 cm-rel a KEK szal fole vitte a pirosat) -> a hurok
+# felszallasa/tartasa alatt (kb. 55-72. kocka) a PIROS a KEK FOLE kerult, ami
+# hibas.  A magas hurok es a "KEK mindig a PIROS fole" kovetelmeny FIZIKAILAG
+# osszeferhetetlen: barmit a hurok a KEK sav fole emel, az a KEK folott van.
 #
-# LESZALLAS: itt SZANDEKOSAN SZETVALASZTJUK a ket palyat.  A regi, kapcsolt
-# palyaval a hiba: XY=q^2 miatt q=0.30-nal (84. kocka) az anyag mar ~91%-ban
-# kifizetodott (a szomszed szal FOLE csuszott), de a hurok MEG 30% magas ->
-# a mozgo szal a szomszed (Csik_2) sikja FOLOTT marad, es csak a hurok teljes
-# elengedesekor (96. kocka) bukik ALA.  Ezert latszott a 2. szal ele csak a
-# csuszas UTAN.  Megoldas: a hurok MAGASSAGA (buckle_z) GYORSAN omoljon ossze,
-# mire az anyag a szomszed fole er -> a fonas ala/fole Z-je mar a csuszas
-# ALATT ervenyesul, es a 2. szal ele lathatova valik a mozgo szal FOLOTT.
-q_up = [
-    (FOLD_END, 0.00),
-    (28,       0.28),   # emelkedik; a behuzas meg kicsi (q^2)
-    (36,       0.55),
-    (46,       0.82),
-    (54,       1.00),   # PEAK: csaknem teljes vizszintes osszeomlas, MAGAS hurok
-    (64,       1.00),   # TARTAS: a hurok a legmagasabb, mielott becsusszik
-]
-# --- LESZALLAS: SIMA, FIZIKAILAG KAPCSOLT (magassag es behuzas EGYUTT) --------
-# A retegzodest MOSTMAR a Geometry Nodes modosito adja (helyzet-fuggo, lasd
-# lejjebb), ezert a hurok idozitesevel NEM kell trukkozni: barmi is sopor at
-# egy szal felett, a Z-je a POZICIOJA szerint helyes.  Igy visszaterhetunk a
-# TERMESZETES, kapcsolt leszallashoz (XY = Z^2), ami sokkal kevesbe gyuri
-# ossze a szalat becsusszas kozben -> tiszta fonas-kep.
-# A MAGASSAG gyorsan 0-ra omlik (64->72), hogy a szal LAPOS legyen es a
-# helyzet-fuggo GN fonas (+/-Z_OFF) ADJA a retegzodest (kulonben a magas hurok
-# mindent takarna).  A BEHUZAS ezutan is SIMAN fizetodik ki (72->92); a
-# retegzodes helyessegevel nem kell torodni -> a GN a pozicio szerint intezi.
-bz_down  = [(68, 0.50), (72, 0.00)]              # magassag: gyorsan 0
-bxy_down = [(72, 0.55), (82, 0.28), (92, 0.00)]  # behuzas: sima kifizetes (kesz ertekek)
-key_anim(buckle_z,  [(f, q)     for f, q in q_up] + bz_down)
-key_anim(buckle_xy, [(f, q * q) for f, q in q_up] + bxy_down)
-
-# --- 3b) A bazis-haromszog feloldasa: csak a hurok teteje korul aktiv ---
-base_flatten = [(FOLD_END, 0.0), (44, 0.0), (54, 1.0), (64, 1.0), (71, 0.0)]
-key_anim(base_key, base_flatten)
-key_anim(talp_key, base_flatten)
-
-# --- 4) A vegleges fonas KOZELTOL TAVOLIG all be, mikozben a hurok elenged ---
-# FONTOS: a szal vilag-X-e = CORNER_X - d, ezert
-#   Csik_3 (FOLE, x[3,4.5]) <- d~2.25 = weave_region 2
-#   Csik_2 (ALA,  x[1.5,3]) <- d~3.75 = weave_region 1   <-- EZ a becsusszo alabujas!
-# Ezert a fonas-kulcsoknak KORAN (mar a hurok osszeomlasakor, ~64-80) kell
-# zarulniuk, hogy a becsusszo anyag mar a csuszas ALATT a Csik_2 sikja ALA
-# kerüljon -> annak ele VEGIG lathato marad a mozgo szal felett (nem csak a vegen).
-# A fonas-kulcsok KORAN zaruljanak (mar a hurok osszeomlasakor, 64-74), hogy a
-# szal mar a csuszas KEZDETETOL a helyes retegben legyen: a farok (region 1)
-# vegig a KEK ALATT sopor at, a ZOLD-ot (region 2) a +Z tartja FELUL.
-# MEGJEGYZES: a fonas ala/fole Z-jet MAR NEM idozitett alak-kulcsok adjak
-# (azok a mozgo anyag PILLANATNYI helyzetetol fuggetlenul sultek volna be,
-# ezert a farok a KEK felett/alatt rosszul jelent meg).  Helyette egy
-# GEOMETRY NODES modosito allitja a Z-t a csucs PILLANATNYI vilag-X-e szerint
-# (lasd lentebb) -> a szal ott, ahol epp a ZOLD/KEK/SZURKE felett halad at,
-# mindig a helyes retegben van, a becsusszas KOZBEN is.
-# (A Fonas_* es Szurke_fole kulcsok letrejonnek, de NEM animaljuk oket -> 0.)
+# Ezert a hurkot ELHAGYJUK.  A hajtas utan a szal egyszeruen LAPOSAN fekszik a
+# 3 szalon, es a retegzodest (ala/fole) KIZAROLAG a helyzet-fuggo Geometry
+# Nodes modosito adja (lasd lentebb):  ZOLD fole, KEK ala, SZURKE fole, a farok
+# vege pedig LAPOS.  Igy MINDEN kockan helyes:  a KEK vegig a PIROS FOLOTT van.
+#
+# A hurok-alakkulcsok (Hurok_Z, Hurok_XY), a nyugalmi emeles (Nyugalom_folott)
+# es a bazis-kisimulas (Alap_kisimul, Talp_kisimul) LETREJONNEK, de NEM
+# animaljuk oket -> vegig 0 -> nincs hatasuk.  A fonast a GN fade hozza be
+# lagyan a hajtas utan (FADE_END, lasd a GN modositoban).
 
 # ==========================================================
 # INTERPOLACIO -> LINEAR.
@@ -516,8 +473,16 @@ _set_action_linear(hinge)
 #      [3,4.5] (ZOLD): +Z (FOLE).  A hatarokon (0,1.5,3,4.5) pontosan 0.
 # A 180 fokos hajtas miatt world_z = -local_z, ezert a lokalis Z-eltolas -Wz.
 # ==========================================================
-def build_weave_gn_modifier(obj):
-    ng = bpy.data.node_groups.new("Fonas_Z_helyzet", 'GeometryNodeTree')
+def build_weave_gn_modifier(obj, corner2=12.0, amp=-Z_OFF,
+                            fade_start=20.0, fade_end=44.0, win_hi=3 * W,
+                            ng_name="Fonas_Z_helyzet"):
+    # corner2   = 2 * hinge_x  ->  world_x = corner2 - localY  (a lehajtott szal vilag-X-e)
+    # amp       = a lokalis Z eltolas amplitudoja.  A 180 fokos hajtas miatt
+    #             world_z = -local_z, ezert amp=-Z_OFF -> vilag +Wz (piros: FOLE szurke...),
+    #             amp=+Z_OFF -> vilag -Wz (zold: FORDITOTT minta -> ALA szurke, FOLE kek).
+    # win_hi    = az ablak jobb hatara world-X-ben (piros: 3W az mind3 szal; zold: 2W = csak
+    #             a KEK+SZURKE savon fon, a sajat regi savja [2W,3W] folott LAPOS marad).
+    ng = bpy.data.node_groups.new(ng_name, 'GeometryNodeTree')
     # ki/be geometria csatlakozok (4.4+/5.x interface API)
     if hasattr(ng, "interface"):
         ng.interface.new_socket("Geometry", in_out='INPUT',  socket_type='NodeSocketGeometry')
@@ -530,13 +495,44 @@ def build_weave_gn_modifier(obj):
     n_out  = nt.new('NodeGroupOutput')
     n_pos  = nt.new('GeometryNodeInputPosition')
     n_sep  = nt.new('ShaderNodeSeparateXYZ')
-    n_wx   = nt.new('ShaderNodeMath'); n_wx.operation   = 'SUBTRACT'  # 12 - Y
-    n_wx.inputs[0].default_value = 12.0
+    n_wx   = nt.new('ShaderNodeMath'); n_wx.operation   = 'SUBTRACT'  # corner2 - Y
+    n_wx.inputs[0].default_value = corner2
     n_ang  = nt.new('ShaderNodeMath'); n_ang.operation  = 'MULTIPLY'  # x * (pi/W)
     n_ang.inputs[1].default_value = math.pi / W
     n_sin  = nt.new('ShaderNodeMath'); n_sin.operation  = 'SINE'
-    n_amp  = nt.new('ShaderNodeMath'); n_amp.operation  = 'MULTIPLY'  # sin * (-Z_OFF) = lokalis Z eltolas
-    n_amp.inputs[1].default_value = -Z_OFF
+    n_amp  = nt.new('ShaderNodeMath'); n_amp.operation  = 'MULTIPLY'  # sin * amp = lokalis Z eltolas
+    n_amp.inputs[1].default_value = amp
+    # --- FADE: a weave amplitudoja 0 -> 1 a hajtas UTAN, lagyan (Scene Time).
+    # A HAJTAS alatt (1..20) 0 -> ott volt a "fodros" hiba (13. kocka), es a
+    # szal ilyenkor meg leng.  A hajtas vegetol (20) a FADE_END-ig (44) a szal
+    # LAGYAN fonodik be a helyen: ekozben latszik a "fonas" mozgas (ZOLD fole,
+    # KEK ala, SZURKE fole all be).  Utana (>=44) vegig TELJES, allo fonas.
+    n_time = nt.new('GeometryNodeInputSceneTime')
+    n_fade = nt.new('ShaderNodeMapRange')                              # frame -> [0,1], clamp
+    n_fade.clamp = True
+    n_fade.inputs['From Min'].default_value = fade_start
+    n_fade.inputs['From Max'].default_value = fade_end
+    n_fade.inputs['To Min'].default_value   = 0.0
+    n_fade.inputs['To Max'].default_value   = 1.0
+    n_off  = nt.new('ShaderNodeMath'); n_off.operation  = 'MULTIPLY'   # amp * fade
+    # --- ABLAK (window): a weave CSAK a 3 szott szalon (world-X in [0, 3W]) hat.
+    # Ezen kivul (a becsusszo szal TAVOLI FAROK-veget is beleertve, world-X<0)
+    # az amplitudo 0 -> a fonal VEGE LAPOS marad, nem hullamzik/emelkedik fel.
+    # Enelkul a sin() a teljes faron oszcillalt: a felemelkedo piros farok a KEK
+    # szal fole logott (ez latszott "piros a kek folott"-kent a 86. kockan).
+    # A sin(pi*x/W) pont 0 az x=0 es x=3W hatarokon -> az ablak folytonos.
+    n_wlo  = nt.new('ShaderNodeMapRange'); n_wlo.clamp = True       # x>=0     -> 1
+    n_wlo.inputs['From Min'].default_value = -1e-3
+    n_wlo.inputs['From Max'].default_value =  1e-3
+    n_wlo.inputs['To Min'].default_value   = 0.0
+    n_wlo.inputs['To Max'].default_value   = 1.0
+    n_whi  = nt.new('ShaderNodeMapRange'); n_whi.clamp = True       # x<=win_hi -> 1
+    n_whi.inputs['From Min'].default_value = win_hi - 1e-3
+    n_whi.inputs['From Max'].default_value = win_hi + 1e-3
+    n_whi.inputs['To Min'].default_value   = 1.0
+    n_whi.inputs['To Max'].default_value   = 0.0
+    n_win  = nt.new('ShaderNodeMath'); n_win.operation  = 'MULTIPLY'   # wlo * whi = savablak
+    n_off2 = nt.new('ShaderNodeMath'); n_off2.operation = 'MULTIPLY'   # (amp*fade) * ablak
     n_comb = nt.new('ShaderNodeCombineXYZ')
     n_set  = nt.new('GeometryNodeSetPosition')
     L = ng.links.new
@@ -546,7 +542,17 @@ def build_weave_gn_modifier(obj):
     L(n_wx.outputs[0],  n_ang.inputs[0])
     L(n_ang.outputs[0], n_sin.inputs[0])
     L(n_sin.outputs[0], n_amp.inputs[0])
-    L(n_amp.outputs[0], n_comb.inputs['Z'])
+    L(n_time.outputs['Frame'], n_fade.inputs['Value'])
+    L(n_amp.outputs[0], n_off.inputs[0])
+    L(n_fade.outputs['Result'], n_off.inputs[1])
+    # savablak: world-X -> [0,3W] window
+    L(n_wx.outputs[0], n_wlo.inputs['Value'])
+    L(n_wx.outputs[0], n_whi.inputs['Value'])
+    L(n_wlo.outputs['Result'], n_win.inputs[0])
+    L(n_whi.outputs['Result'], n_win.inputs[1])
+    L(n_off.outputs[0],  n_off2.inputs[0])
+    L(n_win.outputs[0],  n_off2.inputs[1])
+    L(n_off2.outputs[0], n_comb.inputs['Z'])
     L(n_comb.outputs[0], n_set.inputs['Offset'])
     L(n_set.outputs['Geometry'], n_out.inputs[0])
     mod = obj.modifiers.new("Fonas_Z", 'NODES')
@@ -554,6 +560,104 @@ def build_weave_gn_modifier(obj):
     return mod
 
 build_weave_gn_modifier(strip4)
+
+# ==========================================================
+# ZOLD (Csik_3): a piros FOLOTTI, vele PARHUZAMOS MASODIK vetulek-sor.
+#
+# KOSARFONAS: a ZOLD a pirossal ELLENTETES fazisban fon (a kovetkezo sor mindig
+# forditva): a ZOLD a KEK FOLE es a SZURKE ALA bujik (a piros pont forditva:
+# SZURKE fole, KEK ala).  A ZOLD EGY SZALSZELESSEGGEL (W) FELJEBB fekszik le ->
+# a ket szal PARHUZAMOSAN fut, a zold a piros FOLOTT (world-Y [7.5, 9]).
+#   * a pivot a ZOLD jobb ele, de EGY W-vel FELJEBB: (3W, STEM_LEN+W) = (4.5, 7.5)
+#     -> a hajtas MAGASABBAN kezdodik es MAGASABBAN er veget;
+#   * a hajtas iranya ugyanaz (BALRA), a mechanizmus azonos;
+#   * a hajtas KESOBB tortenik (a piros mar lent van).
+#
+# A lehajtott szal vilag-X-e:  world_x = (hinge_x + hinge_y) - localY.
+# Itt hinge_x+hinge_y = 4.5+7.5 = 12  -> PONT mint a pirosnal (world_x = 12 - Y),
+# ezert a ZOLD a pirossal AZONOS savokban (szurke/kek) es AZONOS iranyban fon.
+# ==========================================================
+GREEN_X0 = 2 * W                                    # a ZOLD bal ele (3.0)
+g_hinge_x, g_hinge_y = GREEN_X0 + W, STEM_LEN + W   # pivot = ZOLD jobb ele, EGY W-vel feljebb (4.5, 7.5)
+GREEN_CREASE_Y = g_hinge_y + W                      # 9.0: itt eri el a crease a bal elt
+GREEN_CORNER2 = g_hinge_x + g_hinge_y               # 12.0: world_x = 12 - localY (mint a piros)
+
+bpy.ops.object.empty_add(type='PLAIN_AXES', location=(g_hinge_x, g_hinge_y, 0))
+g_hinge = bpy.context.active_object
+g_hinge.name = "Hajtas_csuklo_3"
+g_hinge.parent = stem
+
+# --- Zold racs epitese (a Csik_4-gyel azonos suru, 2-oszlopos racs) ---
+g_verts = []
+g_rows = []
+g_anchor_idx = None
+for d in d_values:
+    y = g_hinge_y + d
+    ri = len(g_verts); g_verts.append((GREEN_X0 + W, y, 0.0))    # jobb oszlop: x=3W (4.5)
+    if y < GREEN_CREASE_Y - 1e-9:                                # a crease alatt
+        if g_anchor_idx is None:
+            g_anchor_idx = len(g_verts)
+            g_verts.append((GREEN_X0, GREEN_CREASE_Y, 0.0))      # sarok a tengelyen (3, 9)
+        li = g_anchor_idx
+    else:
+        li = len(g_verts); g_verts.append((GREEN_X0, y, 0.0))    # bal oszlop: x=2W (3)
+    g_rows.append((li, ri, d))
+
+g_faces = []
+for k in range(len(g_rows) - 1):
+    l0, r0, _ = g_rows[k]
+    l1, r1, _ = g_rows[k + 1]
+    if l0 == l1:
+        g_faces.append((l0, r0, r1))
+    else:
+        g_faces.append((l0, r0, r1, l1))
+
+g_mesh = bpy.data.meshes.new("Csik_3_mesh")
+g_mesh.from_pydata(g_verts, [], g_faces)
+g_mesh.update()
+strip3 = bpy.data.objects.new("Csik_3_hajtott", g_mesh)
+bpy.context.collection.objects.link(strip3)
+strip3.parent = g_hinge
+strip3.matrix_parent_inverse = g_hinge.matrix_world.inverted()
+
+# --- Zold fonas-GN:  KOSARFONAS -> a ZOLD a pirossal ELLENTETES fazisban fon
+#     (a kovetkezo vetulek-sor).  amp=+Z_OFF -> world_z elojele forditott:
+#        KEK [W,2W]:  FOLE  (a piros ott ALA)
+#        SZURKE [0,W]: ALA  (a piros ott FOLE)
+#     Ablak [0,2W]: csak a ket kereszteszett szalon (SZURKE+KEK) fon; a sajat
+#     regi savja [2W,3W] folott LAPOS marad.  Fade a hajtas UTAN. ---
+GREEN_FOLD_START = 50
+GREEN_FOLD_END = 70
+GREEN_FADE_END = 94
+build_weave_gn_modifier(strip3,
+                        corner2=GREEN_CORNER2,       # 12 - localY (a pirossal azonos savok)
+                        amp=+Z_OFF,                  # ELLENTETES minta: FOLE kek, ALA szurke
+                        fade_start=float(GREEN_FOLD_END),
+                        fade_end=float(GREEN_FADE_END),
+                        win_hi=2 * W,                # csak a SZURKE+KEK savon fon
+                        ng_name="Fonas_Z_helyzet_zold")
+
+# --- Zold allo talp: a crease alatti (allo) resz.  Mivel a pivot most EGY W-vel
+#     feljebb van, a talp egy magasabb NEGYSZOG: a [6,7.5] savu also teglalap +
+#     a [7.5,9] savban a crease alatti haromszog egyben. ---
+g_talp_verts = [(GREEN_X0,     STEM_LEN,       0.0),   # (3,   6)
+                (GREEN_X0 + W, STEM_LEN,       0.0),   # (4.5, 6)
+                (GREEN_X0 + W, g_hinge_y,      0.0),   # (4.5, 7.5) = a crease also vege (pivot)
+                (GREEN_X0,     GREEN_CREASE_Y, 0.0)]   # (3,   9)   = a crease felso vege
+g_talp_mesh = bpy.data.meshes.new("Csik_3_talp_mesh")
+g_talp_mesh.from_pydata(g_talp_verts, [], [(0, 1, 2, 3)])
+g_talp_mesh.update()
+g_talp = bpy.data.objects.new("Csik_3_talp", g_talp_mesh)
+bpy.context.collection.objects.link(g_talp)
+g_talp.parent = stem
+
+# --- Zold HAJTAS 0->180 fok, a piros UTAN (GREEN_FOLD_START..GREEN_FOLD_END) ---
+g_hinge.rotation_mode = 'AXIS_ANGLE'
+g_hinge.rotation_axis_angle = (0.0, *fold_axis)
+g_hinge.keyframe_insert(data_path="rotation_axis_angle", frame=GREEN_FOLD_START)
+g_hinge.rotation_axis_angle = (math.pi, *fold_axis)
+g_hinge.keyframe_insert(data_path="rotation_axis_angle", frame=GREEN_FOLD_END)
+_set_action_linear(g_hinge)
 
 # ==========================================================
 # DEBUG SZINEZES: a retegzodes (ala/fole) SZEMMEL lathato legyen.
@@ -577,7 +681,8 @@ def set_color(obj, rgba):
 set_color(bpy.data.objects.get("Csik_4_hajtott"), (0.90, 0.10, 0.10, 1.0))  # PIROS  (mozgo)
 set_color(bpy.data.objects.get("Csik_4_talp"),    (0.65, 0.06, 0.06, 1.0))  # sotetpiros
 set_color(bpy.data.objects.get("Csik_2"),         (0.10, 0.30, 0.90, 1.0))  # KEK    (ala bujik)
-set_color(bpy.data.objects.get("Csik_3"),         (0.10, 0.75, 0.20, 1.0))  # ZOLD   (fole megy)
+set_color(bpy.data.objects.get("Csik_3_hajtott"), (0.10, 0.75, 0.20, 1.0))  # ZOLD   (masodik lehajlo szal)
+set_color(bpy.data.objects.get("Csik_3_talp"),    (0.06, 0.45, 0.12, 1.0))  # sotetzold talp
 set_color(bpy.data.objects.get("Csik_1"),         (0.80, 0.80, 0.80, 1.0))  # vilagosszurke
 
 # A 3D viewport(ok) Solid-arnyalasa mutassa az OBJECT szineket.
@@ -593,6 +698,7 @@ except Exception as _e:
 
 scene.frame_set(1)
 
-print("Kesz: hajtas -> flap a 3 szal fole -> MASSZIV fuggoleges hurok "
-      "(felulnezeti hossz ~0, bazis-haromszog kisimul) -> becsusszanas a fonasba.")
-
+print("Kesz: PIROS lehajlik (1-44) es befonodik (FOLE szurke, ALA kek), majd "
+      "utana a ZOLD is lehajlik balra (50-94) ELLENTETES mintaval (FOLE kek, ALA "
+      "szurke), EGY szalszelesseggel FELJEBB -> kosarfonas: a ZOLD a piros "
+      "FOLOTT, vele parhuzamosan, forditott ala/fole fazissal.")
