@@ -372,8 +372,15 @@ scene.frame_end = 104
 FOLD_END = 20
 
 # --- 1) HAJTAS 0->180 fok ---
+# A tengely IRANYA szabja meg, MELYIK fel-terbe leng a flap a hajtas KOZBEN.
+# A vegallas (180 fok) ugyanaz mindket elojellel (R(a,pi) == R(-a,pi)), de az
+# ivet a jel donti el:  egy (0,d,0) flap-pont vilag-Z-je a hajtas alatt
+#   z(theta) = ax * d * sin(theta).
+# A (-inv, inv, 0) tengellyel ax<0 -> z<0 vegig: a flap a sik ALA leng, a 3
+# egyenes szal ALATT sopor at (nem takarja oket).  Ezert (inv, -inv, 0) kell:
+# ax>0 -> z>0, a flap FELULROL ereszkedik a 3 szalra -> a hajtas KOZBEN takarja.
 inv = 1.0 / math.sqrt(2.0)
-fold_axis = (-inv, inv, 0.0)
+fold_axis = (inv, -inv, 0.0)
 hinge.rotation_mode = 'AXIS_ANGLE'
 hinge.rotation_axis_angle = (0.0, *fold_axis)
 hinge.keyframe_insert(data_path="rotation_axis_angle", frame=1)
@@ -472,16 +479,27 @@ def _iter_fcurves(action):
                 for fcu in getattr(cbag, "fcurves", []):
                     yield fcu
 
-def set_linear(obj):
-    sk = getattr(obj.data, "shape_keys", None)
-    if sk and sk.animation_data and sk.animation_data.action:
-        for fcu in _iter_fcurves(sk.animation_data.action):
+def _set_action_linear(anim_owner):
+    ad = getattr(anim_owner, "animation_data", None)
+    if ad and ad.action:
+        for fcu in _iter_fcurves(ad.action):
             for kp in fcu.keyframe_points:
                 kp.interpolation = 'LINEAR'
             fcu.update()
 
+def set_linear(obj):
+    sk = getattr(obj.data, "shape_keys", None)
+    if sk:
+        _set_action_linear(sk)
+
 set_linear(strip4)
 set_linear(talp)
+
+# A HAJTAS (hinge rotacio) fcurve-jei is LINEAR-ra: kulonben a
+# keyframe_insert az alapertelmezett interpolaciot orokli (ha az CONSTANT,
+# a flap a 20. kockan ATUGRIK 180 fokra -> a hajtas FOLYAMATA nem latszik,
+# csak a vegeredmeny).  Igy a fold 1->20 kozott egyenletesen vegigjatszik.
+_set_action_linear(hinge)
 
 # ==========================================================
 # HELYZET-FUGGO FONAS-Z (Geometry Nodes).
