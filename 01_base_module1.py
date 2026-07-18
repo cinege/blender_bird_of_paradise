@@ -25,6 +25,39 @@ def make_plane(name, x0, y0, x1, y1, z=0.0):
     bpy.context.collection.objects.link(obj)
     return obj
 
+def make_circular_cut_stem(name, width, length, radius, z=0.0, segments=48):
+    """Create the base with its bottom-right portion removed by a circular arc."""
+    chord = math.hypot(width, length)
+    if radius < chord / 2.0:
+        raise ValueError("The cut radius is too small to join the opposite corners")
+
+    # The arc joins the upper-right and lower-left corners.  Its centre lies on
+    # the upper-left side of that diagonal, so the edge bows convexly toward
+    # the removed bottom-right portion.
+    mid_x, mid_y = width / 2.0, length / 2.0
+    centre_offset = math.sqrt(radius * radius - (chord / 2.0) ** 2)
+    centre_x = mid_x - length / chord * centre_offset
+    centre_y = mid_y + width / chord * centre_offset
+
+    start_angle = math.atan2(length - centre_y, width - centre_x)
+    end_angle = math.atan2(-centre_y, -centre_x)
+    arc_angle = (end_angle - start_angle + math.pi) % (2.0 * math.pi) - math.pi
+
+    # Upper-right -> arc -> lower-left -> upper-left forms the remaining base.
+    verts = [(width, length, z)]
+    for i in range(1, segments + 1):
+        angle = start_angle + arc_angle * i / segments
+        verts.append((centre_x + radius * math.cos(angle),
+                      centre_y + radius * math.sin(angle), z))
+    verts.append((0.0, length, z))
+
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], [list(range(len(verts)))])
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    return obj
+
 def make_tri(name, p0, p1, p2):
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata([p0, p1, p2], [], [(0, 1, 2)])
@@ -36,7 +69,7 @@ def make_tri(name, p0, p1, p2):
 # ==========================================================
 # To + 3 egyenes csik
 # ==========================================================
-stem = make_plane("To", 0, 0, 4 * W, STEM_LEN)
+stem = make_circular_cut_stem("To", 4 * W, STEM_LEN, radius=18.0)
 
 # Csik_1 (SZURKE) es Csik_2 (KEK) marad EGYENES, allo szal.
 # Csik_3 (ZOLD) NEM egyenes tobbe: a pirossal ANALOG modon LEHAJLIK (lasd lentebb),
@@ -559,7 +592,8 @@ def build_weave_gn_modifier(obj, corner2=12.0, amp=-Z_OFF,
     mod.node_group = ng
     return mod
 
-build_weave_gn_modifier(strip4)
+build_weave_gn_modifier(strip4,
+                        corner2=hinge_x + hinge_y)
 
 # ==========================================================
 # ZOLD (Csik_3): a piros FOLOTTI, vele PARHUZAMOS MASODIK vetulek-sor.
@@ -695,6 +729,10 @@ try:
                     _space.shading.color_type = 'OBJECT'
 except Exception as _e:
     print("Viewport szin-beallitas kihagyva:", _e)
+
+# A teljes kep es minden animalt gyerekobjektum 45 fokkal balra fordul.
+stem.rotation_mode = 'XYZ'
+stem.rotation_euler.z = math.radians(45.0)
 
 scene.frame_set(1)
 
