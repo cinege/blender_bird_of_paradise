@@ -1,5 +1,6 @@
 import bpy
 import math
+from mathutils import Vector
 
 
 # -----------------------------------------------------------------------------
@@ -705,12 +706,12 @@ g_hinge.keyframe_insert(data_path="rotation_axis_angle", frame=GREEN_FOLD_END)
 _set_action_linear(g_hinge)
 
 # ==========================================================
-# SIK, EGYSEGES SZINEK.  Nem hasznalunk sotetebb talp- vagy magassagjelolo
-# arnyalatot: a retegzodest a takaras es a fekete kontur mutatja.
+# SZINEZES: az elso alapmodul palettaja. A masodik modul futtatasakor
+# a 03_assemble_modules.py MODULE_PALETTE valtozoval adja at a sajat palettat.
 #   Csik_4 (mozgo, lehajtott szal) = PIROS
 #   Csik_2 (2. szal, amely ALA bujik a mozgo szal)   = KEK
 #   Csik_3 (3. szal, amely FOLE megy a mozgo szal)    = ZOLD
-#   Csik_1 = vilagosszurke,  To = szurke
+#   Csik_1 = barna,  To = szurke
 # Beallitjuk a viewport arnyalast is OBJECT-szinre, hogy Solid modban is
 # lassanak a szinek (nem kell kezzel semmit atallitani).
 # ==========================================================
@@ -733,17 +734,18 @@ def set_color(obj, rgba):
     obj.data.materials.clear()
     obj.data.materials.append(mat)
 
-RED   = (0.90, 0.10, 0.10, 1.0)
-BLUE  = (0.06, 0.32, 0.95, 1.0)
-GREEN = (0.10, 0.75, 0.20, 1.0)
-GRAY  = (0.72, 0.72, 0.72, 1.0)
-set_color(bpy.data.objects.get("Csik_4_hajtott"), RED)
-set_color(bpy.data.objects.get("Csik_4_talp"),    RED)
-set_color(bpy.data.objects.get("Csik_2"),         BLUE)
-set_color(bpy.data.objects.get("Csik_3_hajtott"), GREEN)
-set_color(bpy.data.objects.get("Csik_3_talp"),    GREEN)
-set_color(bpy.data.objects.get("Csik_1"),         GRAY)
-set_color(bpy.data.objects.get("To"),             GRAY)
+DEFAULT_MODULE_PALETTE = {
+    "Csik_4_hajtott": (0.90, 0.10, 0.10, 1.0),  # PIROS  (mozgo)
+    "Csik_4_talp":    (0.65, 0.06, 0.06, 1.0),  # sotetpiros
+    "Csik_2":         (0.10, 0.30, 0.90, 1.0),  # KEK    (ala bujik)
+    "Csik_3_hajtott": (0.10, 0.75, 0.20, 1.0),  # ZOLD   (masodik lehajlo szal)
+    "Csik_3_talp":    (0.06, 0.45, 0.12, 1.0),  # sotetzold talp
+    "Csik_1":         (0.43, 0.23, 0.10, 1.0),  # BARNA
+    "To":             (0.72, 0.72, 0.72, 1.0),  # szurke
+}
+
+for _name, _rgba in globals().get("MODULE_PALETTE", DEFAULT_MODULE_PALETTE).items():
+    set_color(bpy.data.objects.get(_name), _rgba)
 
 # A 3D viewport(ok) Solid-arnyalasa mutassa az OBJECT szineket.
 try:
@@ -785,6 +787,15 @@ scene.frame_set(1)
 """,
     1,
 )
+MODULE_2_PALETTE = {
+    "Csik_4_hajtott": (0.55, 0.12, 0.85, 1.0),  # LILA  (mozgo)
+    "Csik_4_talp":    (0.35, 0.06, 0.55, 1.0),  # sotetlila
+    "Csik_2":         (0.01, 0.01, 0.01, 1.0),  # FEKETE (ala bujik)
+    "Csik_3_hajtott": (1.00, 0.45, 0.05, 1.0),  # NARANCS (masodik lehajlo szal)
+    "Csik_3_talp":    (0.65, 0.25, 0.02, 1.0),  # sotetnarancs talp
+    "Csik_1":         (0.72, 0.72, 0.72, 1.0),  # SZURKE
+    "To":             (0.72, 0.72, 0.72, 1.0),  # szurke
+}
 SOURCE_FINAL_FRAME = 104
 
 
@@ -793,13 +804,15 @@ def clear_scene():
     bpy.ops.object.delete(use_global=False)
 
 
-def run_module(source, source_name):
+def run_module(source, source_name, palette=None):
     source = source.replace(
         "\nclear_scene()\n",
         "\n# Scene clearing is controlled by 03_assemble_modules.py.\n",
         1,
     )
     namespace = {"__file__": f"<{source_name}>", "__name__": f"assembled_{source_name}"}
+    if palette is not None:
+        namespace["MODULE_PALETTE"] = palette
     before = {obj.as_pointer() for obj in bpy.data.objects}
     exec(compile(source, f"<{source_name}>", "exec"), namespace)
     created = [obj for obj in bpy.data.objects if obj.as_pointer() not in before]
@@ -887,10 +900,19 @@ def key_location(obj, frame, location):
     obj.keyframe_insert(data_path="location", frame=frame)
 
 
+def key_visibility(obj, frame, hidden):
+    if obj is None:
+        return
+    obj.hide_viewport = hidden
+    obj.hide_render = hidden
+    obj.keyframe_insert(data_path="hide_viewport", frame=frame)
+    obj.keyframe_insert(data_path="hide_render", frame=frame)
+
+
 def add_black_outline(obj, material, width=0.035, lift=0.006):
     """Add only the outer contour of a ribbon, never its internal mesh lines."""
     if obj.type != 'MESH' or not obj.data.polygons:
-        return
+        return None
 
     # An edge used by one polygon is a genuine exterior edge.  This deliberately
     # omits all tessellation/subdivision edges, which were read as height lines.
@@ -902,7 +924,7 @@ def add_black_outline(obj, material, width=0.035, lift=0.006):
             edge_use[edge] = edge_use.get(edge, 0) + 1
     boundary = {edge for edge, count in edge_use.items() if count == 1}
     if not boundary:
-        return
+        return None
 
     neighbours = {}
     for a, b in boundary:
@@ -955,6 +977,131 @@ def add_black_outline(obj, material, width=0.035, lift=0.006):
     outline.location = (0.0, 0.0, 0.0)
     outline.rotation_euler = (0.0, 0.0, 0.0)
     outline.scale = (1.0, 1.0, 1.0)
+    return outline
+
+
+def object_axis_2d(obj):
+    pts = [obj.matrix_world @ v.co for v in obj.data.vertices]
+    if not pts:
+        return Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 0.0))
+
+    center = Vector((sum(p.x for p in pts) / len(pts),
+                     sum(p.y for p in pts) / len(pts),
+                     0.0))
+    sxx = sum((p.x - center.x) ** 2 for p in pts)
+    syy = sum((p.y - center.y) ** 2 for p in pts)
+    sxy = sum((p.x - center.x) * (p.y - center.y) for p in pts)
+    angle = 0.5 * math.atan2(2.0 * sxy, sxx - syy)
+    return center, Vector((math.cos(angle), math.sin(angle), 0.0)).normalized()
+
+
+def cross2(a, b):
+    return a.x * b.y - a.y * b.x
+
+
+def line_intersection_2d(obj_a, obj_b):
+    p, axis_a = object_axis_2d(obj_a)
+    q, axis_b = object_axis_2d(obj_b)
+    denom = cross2(axis_a, axis_b)
+    if abs(denom) < 1e-8:
+        return p, axis_a
+    return p + axis_a * (cross2(q - p, axis_b) / denom), axis_a
+
+
+def point_in_ribbon_bounds(obj, point, margin=0.08):
+    center, axis = object_axis_2d(obj)
+    perp = Vector((-axis.y, axis.x, 0.0))
+    coords = [obj.matrix_world @ v.co for v in obj.data.vertices]
+    axis_values = [(p - center).dot(axis) for p in coords]
+    perp_values = [(p - center).dot(perp) for p in coords]
+    rel = point - center
+    along = rel.dot(axis)
+    across = rel.dot(perp)
+    return (min(axis_values) - margin <= along <= max(axis_values) + margin and
+            min(perp_values) - margin <= across <= max(perp_values) + margin)
+
+
+def crossing_visible(top_obj, under_obj):
+    point, _axis = line_intersection_2d(top_obj, under_obj)
+    return (point_in_ribbon_bounds(top_obj, point) and
+            point_in_ribbon_bounds(under_obj, point))
+
+
+def first_crossing_frame(top_obj, under_obj, frame_start, frame_end):
+    for frame in range(frame_start, frame_end + 1):
+        scene.frame_set(frame)
+        bpy.context.view_layer.update()
+        if crossing_visible(top_obj, under_obj):
+            return frame
+    return frame_end
+
+
+def make_crossing_cap(name, material, length, width):
+    half_len = 0.5 * length
+    half_width = 0.5 * width
+    mesh = bpy.data.meshes.new(f"{name}_mesh")
+    mesh.from_pydata(
+        [(-half_len, -half_width, 0.0),
+         ( half_len, -half_width, 0.0),
+         ( half_len,  half_width, 0.0),
+         (-half_len,  half_width, 0.0)],
+        [],
+        [(0, 1, 2, 3)],
+    )
+    mesh.update()
+    if material is not None:
+        mesh.materials.append(material)
+    cap = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(cap)
+    return cap
+
+
+def key_crossing_cap_transform(cap, top_obj, under_obj, frame, lift):
+    scene.frame_set(frame)
+    bpy.context.view_layer.update()
+    point, axis = line_intersection_2d(top_obj, under_obj)
+    cap.location = (point.x, point.y, lift)
+    cap.rotation_mode = 'XYZ'
+    cap.rotation_euler = (0.0, 0.0, math.atan2(axis.y, axis.x))
+    cap.keyframe_insert(data_path="location", frame=frame)
+    cap.keyframe_insert(data_path="rotation_euler", frame=frame)
+
+
+def add_assembly_weave_caps(rules, outline_material):
+    cap_length = 1.24 * W
+    cap_width = 1.04 * W
+    cap_lift = 0.16
+
+    for name, top_name, under_name in rules:
+        top_obj = bpy.data.objects.get(top_name)
+        under_obj = bpy.data.objects.get(under_name)
+        if top_obj is None or under_obj is None:
+            print(f"Assembly weave cap skipped: {name}")
+            continue
+
+        material = top_obj.data.materials[0] if top_obj.data.materials else None
+        cap = make_crossing_cap(f"Fonas_fedo_{name}", material, cap_length, cap_width)
+        cap.color = top_obj.color
+        outline = add_black_outline(cap, outline_material, width=0.026, lift=0.008)
+
+        start_frame = first_crossing_frame(top_obj, under_obj,
+                                           ASSEMBLY_START, TIGHTEN_END)
+        transform_frames = [start_frame, TIGHTEN_END]
+        if start_frame < INTERLOCK_FRAME < TIGHTEN_END:
+            transform_frames.insert(1, INTERLOCK_FRAME)
+        for frame in transform_frames:
+            key_crossing_cap_transform(cap, top_obj, under_obj, frame, cap_lift)
+        linearize(cap)
+
+        if start_frame > ASSEMBLY_START:
+            key_visibility(cap, ASSEMBLY_START, True)
+            key_visibility(outline, ASSEMBLY_START, True)
+            key_visibility(cap, start_frame - 1, True)
+            key_visibility(outline, start_frame - 1, True)
+        key_visibility(cap, start_frame, False)
+        key_visibility(outline, start_frame, False)
+        key_visibility(cap, TIGHTEN_END, False)
+        key_visibility(outline, TIGHTEN_END, False)
 
 
 # -----------------------------------------------------------------------------
@@ -963,7 +1110,8 @@ def add_black_outline(obj, material, width=0.035, lift=0.006):
 clear_scene()
 module_1_scope, module_1_objects = run_module(MODULE_1_SOURCE, "module_1")
 tag_objects(module_1_objects, "M1")
-module_2_scope, module_2_objects = run_module(MODULE_2_SOURCE, "module_2")
+module_2_scope, module_2_objects = run_module(MODULE_2_SOURCE, "module_2",
+                                              MODULE_2_PALETTE)
 tag_objects(module_2_objects, "M2")
 
 scene = bpy.context.scene
@@ -974,8 +1122,8 @@ freeze_final_meshes(module_2_objects)
 # -----------------------------------------------------------------------------
 # Assembly layout and animation.
 #
-# The source modules are mirror-oriented at their final frames: the long gray
-# and blue threads therefore meet at right angles when brought together.  M2
+# The source modules are mirror-oriented at their final frames: the long
+# standing threads therefore meet at right angles when brought together.  M2
 # starts on the left and the module bases continue to their final registered
 # positions after the crossings engage.
 # -----------------------------------------------------------------------------
@@ -1025,8 +1173,7 @@ for tag, objects, module_group in (
         parent = thread_groups[tag, label] if label else module_group
         parent_keep_world(obj, parent)
 
-# A single black material and outer contours make the occlusion order legible
-# without dark/light height shading on blue or gray ribbons.
+# A single black material and outer contours make the occlusion order legible.
 outline_material = bpy.data.materials.new("Fekete_kontur")
 outline_material.diffuse_color = (0.0, 0.0, 0.0, 1.0)
 outline_material.use_nodes = True
@@ -1063,6 +1210,20 @@ key_location(module_2_group, INTERLOCK_FRAME, (MODULE_2_INTERLOCK_X, 0.0, 0.0))
 key_location(module_2_group, TIGHTEN_END, (MODULE_2_FINAL_X, 0.0, 0.0))
 linearize(module_1_group)
 linearize(module_2_group)
+
+# A modulok kozotti uj keresztezodesek kosarfonas-rendje.  Ez paronkent
+# valtakozik, ezert objektumszintu Z-sorrenddel nem irhato le ciklus nelkul.
+ASSEMBLY_WEAVE_RULES = [
+    ("szurke_barna_folott",   "M2_Csik_1",         "M1_Csik_1"),          # barna ALA szurke
+    ("barna_fekete_folott",  "M1_Csik_1",         "M2_Csik_2"),          # barna FOLE fekete
+    ("kek_szurke_folott",    "M1_Csik_2",         "M2_Csik_1"),          # kek FOLE szurke
+    ("fekete_kek_folott",    "M2_Csik_2",         "M1_Csik_2"),          # kek ALA fekete
+    ("zold_narancs_folott",  "M1_Csik_3_hajtott", "M2_Csik_3_hajtott"),  # zold FOLE narancs
+    ("lila_zold_folott",     "M2_Csik_4_hajtott", "M1_Csik_3_hajtott"),  # zold ALA lila
+    ("narancs_piros_folott", "M2_Csik_3_hajtott", "M1_Csik_4_hajtott"),  # piros ALA narancs
+    ("piros_lila_folott",    "M1_Csik_4_hajtott", "M2_Csik_4_hajtott"),  # piros FOLE lila
+]
+add_assembly_weave_caps(ASSEMBLY_WEAVE_RULES, outline_material)
 
 # The coloured threads no longer slide relative to their own module.  The
 # earlier extra tighten slide translated the blue/green/red groups sideways
