@@ -1,6 +1,5 @@
 import bpy
 import math
-from mathutils import Vector
 
 
 # -----------------------------------------------------------------------------
@@ -958,299 +957,6 @@ def add_black_outline(obj, material, width=0.035, lift=0.006):
     outline.scale = (1.0, 1.0, 1.0)
 
 
-def add_basket_weave_modifier(obj, phase, crossing_half_width=None):
-    """Subdivide and smoothly offset a thread through basket-weave crossings."""
-    if crossing_half_width is None:
-        crossing_half_width = CROSSING_HALF_WIDTH
-
-    # The module group only translates, so this final-frame matrix gives a
-    # stable conversion from the object's local coordinates to the direction
-    # ALONG the arriving (left-module) thread and to global vertical height.
-    # The wave must run along this direction: using the perpendicular
-    # north-east direction made it change layer through the middle of one
-    # crossing, so the right red strand appeared to pierce the left green.
-    world = obj.matrix_world.copy()
-    linear = world.to_3x3()
-    weave_axis = Vector((
-        (linear[0][0] - linear[1][0]) / math.sqrt(2.0),
-        (linear[0][1] - linear[1][1]) / math.sqrt(2.0),
-        (linear[0][2] - linear[1][2]) / math.sqrt(2.0),
-    ))
-    weave_axis_offset = (world.translation.x - world.translation.y) / math.sqrt(2.0)
-    local_up = linear.inverted() @ Vector((0.0, 0.0, 1.0))
-    local_vertical = local_up * (BASKET_HEIGHT * phase)
-    initial_local_lift = local_up * INITIAL_CLEARANCE
-    world_x = Vector((linear[0][0], linear[0][1], linear[0][2]))
-    world_x_offset = world.translation.x
-
-    node_group = bpy.data.node_groups.new(f"Basket_weave_{obj.name}", 'GeometryNodeTree')
-    if hasattr(node_group, "interface"):
-        node_group.interface.new_socket("Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
-        node_group.interface.new_socket("Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
-    else:
-        node_group.inputs.new('NodeSocketGeometry', "Geometry")
-        node_group.outputs.new('NodeSocketGeometry', "Geometry")
-
-    nodes = node_group.nodes
-    links = node_group.links
-    group_in = nodes.new('NodeGroupInput')
-    group_out = nodes.new('NodeGroupOutput')
-    subdivide = nodes.new('GeometryNodeSubdivideMesh')
-    subdivide.inputs['Level'].default_value = 4 if len(obj.data.vertices) <= 4 else 1
-    position = nodes.new('GeometryNodeInputPosition')
-    coeff = nodes.new('ShaderNodeCombineXYZ')
-    coeff.inputs['X'].default_value = weave_axis.x
-    coeff.inputs['Y'].default_value = weave_axis.y
-    coeff.inputs['Z'].default_value = weave_axis.z
-    dot = nodes.new('ShaderNodeVectorMath')
-    dot.operation = 'DOT_PRODUCT'
-    offset = nodes.new('ShaderNodeMath')
-    offset.operation = 'ADD'
-    offset.inputs[1].default_value = weave_axis_offset
-    scale = nodes.new('ShaderNodeMath')
-    scale.operation = 'MULTIPLY'
-    scale.inputs[1].default_value = math.pi / W
-    # Shift the sine into a cosine so a crossing centre is a height peak or
-    # trough, never the zero-height layer transition.
-    crossing_phase = nodes.new('ShaderNodeMath')
-    crossing_phase.operation = 'ADD'
-    crossing_phase.inputs[1].default_value = math.pi / 2.0
-    sine = nodes.new('ShaderNodeMath')
-    sine.operation = 'SINE'
-    # Keep broad, flat over/under plateaus at the crossings, with a continuous
-    # transition in the gap between them.  A hard switch would create visible
-    # vertical cross-lines through a continuous ribbon.
-    weave_profile = nodes.new('ShaderNodeMapRange')
-    weave_profile.clamp = True
-    weave_profile.inputs['From Min'].default_value = -0.35
-    weave_profile.inputs['From Max'].default_value = 0.35
-    weave_profile.inputs['To Min'].default_value = -1.0
-    weave_profile.inputs['To Max'].default_value = 1.0
-    scene_time = nodes.new('GeometryNodeInputSceneTime')
-    fade = nodes.new('ShaderNodeMapRange')
-    fade.clamp = True
-    fade.inputs['From Min'].default_value = WEAVE_START
-    fade.inputs['From Max'].default_value = WEAVE_END
-    fade.inputs['To Min'].default_value = 0.0
-    fade.inputs['To Max'].default_value = 1.0
-    amplitude = nodes.new('ShaderNodeMath')
-    amplitude.operation = 'MULTIPLY'
-    x_coeff = nodes.new('ShaderNodeCombineXYZ')
-    x_coeff.inputs['X'].default_value = world_x.x
-    x_coeff.inputs['Y'].default_value = world_x.y
-    x_coeff.inputs['Z'].default_value = world_x.z
-    x_dot = nodes.new('ShaderNodeVectorMath')
-    x_dot.operation = 'DOT_PRODUCT'
-    x_offset = nodes.new('ShaderNodeMath')
-    x_offset.operation = 'ADD'
-    x_offset.inputs[1].default_value = world_x_offset
-    x_lower = nodes.new('ShaderNodeMapRange')
-    x_lower.clamp = True
-    x_lower.inputs['From Min'].default_value = -crossing_half_width - CROSSING_EDGE_FADE
-    x_lower.inputs['From Max'].default_value = -crossing_half_width + CROSSING_EDGE_FADE
-    x_lower.inputs['To Min'].default_value = 0.0
-    x_lower.inputs['To Max'].default_value = 1.0
-    x_upper = nodes.new('ShaderNodeMapRange')
-    x_upper.clamp = True
-    x_upper.inputs['From Min'].default_value = crossing_half_width - CROSSING_EDGE_FADE
-    x_upper.inputs['From Max'].default_value = crossing_half_width + CROSSING_EDGE_FADE
-    x_upper.inputs['To Min'].default_value = 1.0
-    x_upper.inputs['To Max'].default_value = 0.0
-    crossing_window = nodes.new('ShaderNodeMath')
-    crossing_window.operation = 'MULTIPLY'
-    windowed_amplitude = nodes.new('ShaderNodeMath')
-    windowed_amplitude.operation = 'MULTIPLY'
-    remaining_lift = nodes.new('ShaderNodeMath')
-    remaining_lift.operation = 'SUBTRACT'
-    remaining_lift.inputs[0].default_value = 1.0
-    initial_amplitude = nodes.new('ShaderNodeMath')
-    initial_amplitude.operation = 'MULTIPLY'
-    vertical = nodes.new('ShaderNodeCombineXYZ')
-    vertical.inputs['X'].default_value = local_vertical.x
-    vertical.inputs['Y'].default_value = local_vertical.y
-    vertical.inputs['Z'].default_value = local_vertical.z
-    initial_vertical = nodes.new('ShaderNodeCombineXYZ')
-    initial_vertical.inputs['X'].default_value = initial_local_lift.x
-    initial_vertical.inputs['Y'].default_value = initial_local_lift.y
-    initial_vertical.inputs['Z'].default_value = initial_local_lift.z
-    vector_scale = nodes.new('ShaderNodeVectorMath')
-    vector_scale.operation = 'SCALE'
-    initial_vector_scale = nodes.new('ShaderNodeVectorMath')
-    initial_vector_scale.operation = 'SCALE'
-    total_offset = nodes.new('ShaderNodeVectorMath')
-    total_offset.operation = 'ADD'
-    set_position = nodes.new('GeometryNodeSetPosition')
-
-    links.new(group_in.outputs[0], subdivide.inputs['Mesh'])
-    links.new(subdivide.outputs['Mesh'], set_position.inputs['Geometry'])
-    links.new(position.outputs['Position'], dot.inputs[0])
-    links.new(coeff.outputs['Vector'], dot.inputs[1])
-    links.new(dot.outputs['Value'], offset.inputs[0])
-    links.new(offset.outputs[0], scale.inputs[0])
-    links.new(scale.outputs[0], crossing_phase.inputs[0])
-    links.new(crossing_phase.outputs[0], sine.inputs[0])
-    links.new(sine.outputs[0], weave_profile.inputs['Value'])
-    links.new(weave_profile.outputs['Result'], amplitude.inputs[0])
-    links.new(scene_time.outputs['Frame'], fade.inputs['Value'])
-    links.new(fade.outputs['Result'], amplitude.inputs[1])
-    links.new(position.outputs['Position'], x_dot.inputs[0])
-    links.new(x_coeff.outputs['Vector'], x_dot.inputs[1])
-    links.new(x_dot.outputs['Value'], x_offset.inputs[0])
-    links.new(x_offset.outputs[0], x_lower.inputs['Value'])
-    links.new(x_offset.outputs[0], x_upper.inputs['Value'])
-    links.new(x_lower.outputs['Result'], crossing_window.inputs[0])
-    links.new(x_upper.outputs['Result'], crossing_window.inputs[1])
-    links.new(amplitude.outputs[0], windowed_amplitude.inputs[0])
-    links.new(crossing_window.outputs[0], windowed_amplitude.inputs[1])
-    links.new(fade.outputs['Result'], remaining_lift.inputs[1])
-    links.new(remaining_lift.outputs[0], initial_amplitude.inputs[0])
-    links.new(crossing_window.outputs[0], initial_amplitude.inputs[1])
-    links.new(vertical.outputs['Vector'], vector_scale.inputs['Vector'])
-    links.new(windowed_amplitude.outputs[0], vector_scale.inputs['Scale'])
-    links.new(initial_vertical.outputs['Vector'], initial_vector_scale.inputs['Vector'])
-    links.new(initial_amplitude.outputs[0], initial_vector_scale.inputs['Scale'])
-    links.new(vector_scale.outputs['Vector'], total_offset.inputs[0])
-    links.new(initial_vector_scale.outputs['Vector'], total_offset.inputs[1])
-    links.new(total_offset.outputs['Vector'], set_position.inputs['Offset'])
-    links.new(set_position.outputs['Geometry'], group_out.inputs[0])
-
-    modifier = obj.modifiers.new("Basket_weave", 'NODES')
-    modifier.node_group = node_group
-    return modifier
-
-
-def add_basket_crossing_caps(obj, phase):
-    """Create planar, alternating over/under segments without bending a ribbon."""
-    world = obj.matrix_world.copy()
-    linear = world.to_3x3()
-    local_up = linear.inverted() @ Vector((0.0, 0.0, 1.0))
-    weave_axis = Vector((
-        (linear[0][0] - linear[1][0]) / math.sqrt(2.0),
-        (linear[0][1] - linear[1][1]) / math.sqrt(2.0),
-        (linear[0][2] - linear[1][2]) / math.sqrt(2.0),
-    ))
-    weave_axis_offset = (world.translation.x - world.translation.y) / math.sqrt(2.0)
-    world_x = Vector((linear[0][0], linear[0][1], linear[0][2]))
-    world_x_offset = world.translation.x
-
-    node_group = bpy.data.node_groups.new(f"Basket_caps_{obj.name}", 'GeometryNodeTree')
-    if hasattr(node_group, "interface"):
-        node_group.interface.new_socket("Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
-        node_group.interface.new_socket("Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
-    else:
-        node_group.inputs.new('NodeSocketGeometry', "Geometry")
-        node_group.outputs.new('NodeSocketGeometry', "Geometry")
-
-    nodes = node_group.nodes
-    links = node_group.links
-    group_in = nodes.new('NodeGroupInput')
-    group_out = nodes.new('NodeGroupOutput')
-    subdivide = nodes.new('GeometryNodeSubdivideMesh')
-    subdivide.inputs['Level'].default_value = 4 if len(obj.data.vertices) <= 4 else 1
-    position = nodes.new('GeometryNodeInputPosition')
-
-    # Along-thread checkerboard parity: neighbouring crossings swap which
-    # ribbon receives the raised cap.
-    axis_coeff = nodes.new('ShaderNodeCombineXYZ')
-    axis_coeff.inputs['X'].default_value = weave_axis.x
-    axis_coeff.inputs['Y'].default_value = weave_axis.y
-    axis_coeff.inputs['Z'].default_value = weave_axis.z
-    axis_dot = nodes.new('ShaderNodeVectorMath'); axis_dot.operation = 'DOT_PRODUCT'
-    axis_offset = nodes.new('ShaderNodeMath'); axis_offset.operation = 'ADD'
-    axis_offset.inputs[1].default_value = weave_axis_offset
-    axis_scale = nodes.new('ShaderNodeMath'); axis_scale.operation = 'MULTIPLY'
-    axis_scale.inputs[1].default_value = math.pi / W
-    axis_phase = nodes.new('ShaderNodeMath'); axis_phase.operation = 'ADD'
-    axis_phase.inputs[1].default_value = math.pi / 2.0
-    axis_sine = nodes.new('ShaderNodeMath'); axis_sine.operation = 'SINE'
-    phase_sign = nodes.new('ShaderNodeMath'); phase_sign.operation = 'MULTIPLY'
-    phase_sign.inputs[1].default_value = phase
-    is_over = nodes.new('ShaderNodeMath'); is_over.operation = 'GREATER_THAN'
-
-    # Only create caps inside the central assembly overlap.  The original
-    # ribbon is retained as a flat lower layer everywhere else.
-    x_coeff = nodes.new('ShaderNodeCombineXYZ')
-    x_coeff.inputs['X'].default_value = world_x.x
-    x_coeff.inputs['Y'].default_value = world_x.y
-    x_coeff.inputs['Z'].default_value = world_x.z
-    x_dot = nodes.new('ShaderNodeVectorMath'); x_dot.operation = 'DOT_PRODUCT'
-    x_offset = nodes.new('ShaderNodeMath'); x_offset.operation = 'ADD'
-    x_offset.inputs[1].default_value = world_x_offset
-    x_lower = nodes.new('ShaderNodeMapRange'); x_lower.clamp = True
-    x_lower.inputs['From Min'].default_value = -CROSSING_HALF_WIDTH - CROSSING_EDGE_FADE
-    x_lower.inputs['From Max'].default_value = -CROSSING_HALF_WIDTH + CROSSING_EDGE_FADE
-    x_lower.inputs['To Min'].default_value = 0.0
-    x_lower.inputs['To Max'].default_value = 1.0
-    x_upper = nodes.new('ShaderNodeMapRange'); x_upper.clamp = True
-    x_upper.inputs['From Min'].default_value = CROSSING_HALF_WIDTH - CROSSING_EDGE_FADE
-    x_upper.inputs['From Max'].default_value = CROSSING_HALF_WIDTH + CROSSING_EDGE_FADE
-    x_upper.inputs['To Min'].default_value = 1.0
-    x_upper.inputs['To Max'].default_value = 0.0
-    in_window = nodes.new('ShaderNodeMath'); in_window.operation = 'MULTIPLY'
-    window_select = nodes.new('ShaderNodeMath'); window_select.operation = 'GREATER_THAN'
-    window_select.inputs[1].default_value = 0.5
-    cap_select = nodes.new('FunctionNodeBooleanMath'); cap_select.operation = 'AND'
-
-    separate = nodes.new('GeometryNodeSeparateGeometry')
-    base = nodes.new('GeometryNodeSetPosition')
-    cap = nodes.new('GeometryNodeSetPosition')
-    join = nodes.new('GeometryNodeJoinGeometry')
-    scene_time = nodes.new('GeometryNodeInputSceneTime')
-    fade = nodes.new('ShaderNodeMapRange'); fade.clamp = True
-    fade.inputs['From Min'].default_value = WEAVE_START
-    fade.inputs['From Max'].default_value = WEAVE_END
-    fade.inputs['To Min'].default_value = 0.0
-    fade.inputs['To Max'].default_value = 1.0
-    base_vector = nodes.new('ShaderNodeCombineXYZ')
-    base_vector.inputs['X'].default_value = -local_up.x * BASKET_HEIGHT
-    base_vector.inputs['Y'].default_value = -local_up.y * BASKET_HEIGHT
-    base_vector.inputs['Z'].default_value = -local_up.z * BASKET_HEIGHT
-    cap_vector = nodes.new('ShaderNodeCombineXYZ')
-    cap_vector.inputs['X'].default_value = local_up.x * BASKET_HEIGHT
-    cap_vector.inputs['Y'].default_value = local_up.y * BASKET_HEIGHT
-    cap_vector.inputs['Z'].default_value = local_up.z * BASKET_HEIGHT
-    base_scale = nodes.new('ShaderNodeVectorMath'); base_scale.operation = 'SCALE'
-    cap_scale = nodes.new('ShaderNodeVectorMath'); cap_scale.operation = 'SCALE'
-
-    L = links.new
-    L(group_in.outputs[0], subdivide.inputs['Mesh'])
-    L(position.outputs['Position'], axis_dot.inputs[0])
-    L(axis_coeff.outputs['Vector'], axis_dot.inputs[1])
-    L(axis_dot.outputs['Value'], axis_offset.inputs[0])
-    L(axis_offset.outputs[0], axis_scale.inputs[0])
-    L(axis_scale.outputs[0], axis_phase.inputs[0])
-    L(axis_phase.outputs[0], axis_sine.inputs[0])
-    L(axis_sine.outputs[0], phase_sign.inputs[0])
-    L(phase_sign.outputs[0], is_over.inputs[0])
-    L(position.outputs['Position'], x_dot.inputs[0])
-    L(x_coeff.outputs['Vector'], x_dot.inputs[1])
-    L(x_dot.outputs['Value'], x_offset.inputs[0])
-    L(x_offset.outputs[0], x_lower.inputs['Value'])
-    L(x_offset.outputs[0], x_upper.inputs['Value'])
-    L(x_lower.outputs['Result'], in_window.inputs[0])
-    L(x_upper.outputs['Result'], in_window.inputs[1])
-    L(in_window.outputs[0], window_select.inputs[0])
-    L(is_over.outputs[0], cap_select.inputs[0])
-    L(window_select.outputs[0], cap_select.inputs[1])
-    L(subdivide.outputs['Mesh'], separate.inputs['Geometry'])
-    L(cap_select.outputs[0], separate.inputs['Selection'])
-    L(subdivide.outputs['Mesh'], base.inputs['Geometry'])
-    L(separate.outputs['Selection'], cap.inputs['Geometry'])
-    L(scene_time.outputs['Frame'], fade.inputs['Value'])
-    L(base_vector.outputs['Vector'], base_scale.inputs['Vector'])
-    L(cap_vector.outputs['Vector'], cap_scale.inputs['Vector'])
-    L(fade.outputs['Result'], base_scale.inputs['Scale'])
-    L(fade.outputs['Result'], cap_scale.inputs['Scale'])
-    L(base_scale.outputs['Vector'], base.inputs['Offset'])
-    L(cap_scale.outputs['Vector'], cap.inputs['Offset'])
-    L(base.outputs['Geometry'], join.inputs['Geometry'])
-    L(cap.outputs['Geometry'], join.inputs['Geometry'])
-    L(join.outputs['Geometry'], group_out.inputs[0])
-
-    modifier = obj.modifiers.new("Basket_caps", 'NODES')
-    modifier.node_group = node_group
-
-
 # -----------------------------------------------------------------------------
 # Source modules: execute both, evaluate frame 104, and bake that state.
 # -----------------------------------------------------------------------------
@@ -1270,8 +976,8 @@ freeze_final_meshes(module_2_objects)
 #
 # The source modules are mirror-oriented at their final frames: the long gray
 # and blue threads therefore meet at right angles when brought together.  M2
-# starts on the left.  Once the modules meet, only the new central crossing is
-# lifted above M1 before it settles into the alternating basket pattern.
+# starts on the left and the module bases continue to their final registered
+# positions after the crossings engage.
 # -----------------------------------------------------------------------------
 W = 1.5
 ASSEMBLY_START = 1
@@ -1284,8 +990,6 @@ INTERLOCK_FRAME = 36
 # moving past that point only over-tightened the already closed middle.
 TIGHTEN_FULL_END = 95            # original timing; defines the closing speed
 TIGHTEN_END = 87                 # the central white square vanishes here
-WEAVE_START = 20
-WEAVE_END = TIGHTEN_END
 ASSEMBLY_END = TIGHTEN_END
 MODULE_1_START_X = 48.0
 MODULE_1_INTERLOCK_X = 24.0
@@ -1302,14 +1006,6 @@ MODULE_1_FINAL_X = BASE_MARGIN_CONTACT_X + 2.0 * W / math.sqrt(2.0)
 MODULE_2_START_X = -48.0
 MODULE_2_INTERLOCK_X = -24.0
 MODULE_2_FINAL_X = -MODULE_1_FINAL_X
-INITIAL_CLEARANCE = 0.0
-# This is only a depth-buffer separation.  The visible weave is defined by
-# clean coloured ribbons and their black contours, not by vertical waves.
-BASKET_HEIGHT = 0.10
-# Only the central overlap moves during the new basket weave.  Existing woven
-# portions of each imported module remain in their completed final form.
-CROSSING_HALF_WIDTH = 7.0
-CROSSING_EDGE_FADE = 1.0
 
 module_1_group = add_empty("Module_1_right")
 module_2_group = add_empty("Module_2_left")
@@ -1375,39 +1071,12 @@ linearize(module_2_group)
 # Stopping the closing exactly when the central white square vanishes makes
 # that slide unnecessary: each module now travels as one rigid piece.
 
-# Evaluate the aligned final transforms before deriving the local-to-world
-# crossing window for each thread modifier.
-scene.frame_set(WEAVE_END)
-bpy.context.view_layer.update()
-
-# Phase assignment for the central basket weave.  The column profile already
-# flips sign between neighbouring lattice columns, so the two LONG threads
-# (gray, blue) must share ONE phase: that alone alternates them over/under
-# across the crossings.  The two crossing tails (green, red) take the
-# OPPOSITE phase, which guarantees that at every crossing between two ribbons
-# of the same module the lifts point apart (never equal).  With the old
-# alternating signs (gray -1, blue +1, green -1, red +1) a tail got exactly
-# the same lift as the long thread it crossed, the two ribbons ended up
-# coplanar, and each such crossing square flickered with BOTH colours
-# instead of showing only the covering thread.
-# The black contour curves receive the same node group, so the outlines
-# follow their ribbon through the lift instead of poking through neighbours.
-for label, phase in (("gray", -1.0), ("blue", -1.0), ("green", 1.0), ("red", 1.0)):
-    for obj in module_2_objects:
-        if obj.type == 'MESH' and thread_label(obj.name, "M2") == label:
-            modifier = add_basket_weave_modifier(obj, phase)
-            for child in obj.children:
-                if child.name.startswith("Kontur_"):
-                    child_modifier = child.modifiers.new("Basket_weave", 'NODES')
-                    child_modifier.node_group = modifier.node_group
-
 scene.frame_start = ASSEMBLY_START
 scene.frame_end = ASSEMBLY_END
 scene.frame_set(ASSEMBLY_START)
 
 print(
-    "Assembly ready: M2 enters from the left; only the new central crossing "
-    "develops an alternating under-over-under basket weave while the threads "
-    f"engage and tighten (frames 1-{ASSEMBLY_END}); the closing stops when "
-    "the central white square vanishes."
+    "Assembly ready: M2 enters from the left; the modules engage and tighten "
+    f"(frames 1-{ASSEMBLY_END}); the closing stops when the central white "
+    "square vanishes."
 )
