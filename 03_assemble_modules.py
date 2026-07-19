@@ -23,7 +23,9 @@ W = 1.5                          # egy csik szelessege
 TOTAL_LEN = 54.0                 # teljes csik hossza
 CUT_LEN = 42.0                   # ebbol ennyi van bevagva 4 reszre
 STEM_LEN = TOTAL_LEN - CUT_LEN   # vagatlan to hossza (12 cm; a 6 cm szeles alap duplaja)
-Z_OFF = 0.35                     # mennyivel emelkedjen/sullyedjen a fonal (vizualis)
+# A retegkulonbseg csak technikai: epp eleg ahhoz, hogy a fedes biztos legyen,
+# de felulnezetben ne rajzoljon "magassagi hullamokat" a szalagokra.
+Z_OFF = 0.05
 MARGIN = 0.15 * W                # atmeneti zona szelessege a fel/le vagasoknal
 
 def make_plane(name, x0, y0, x1, y1, z=0.0):
@@ -704,7 +706,8 @@ g_hinge.keyframe_insert(data_path="rotation_axis_angle", frame=GREEN_FOLD_END)
 _set_action_linear(g_hinge)
 
 # ==========================================================
-# DEBUG SZINEZES: a retegzodes (ala/fole) SZEMMEL lathato legyen.
+# SIK, EGYSEGES SZINEK.  Nem hasznalunk sotetebb talp- vagy magassagjelolo
+# arnyalatot: a retegzodest a takaras es a fekete kontur mutatja.
 #   Csik_4 (mozgo, lehajtott szal) = PIROS
 #   Csik_2 (2. szal, amely ALA bujik a mozgo szal)   = KEK
 #   Csik_3 (3. szal, amely FOLE megy a mozgo szal)    = ZOLD
@@ -718,16 +721,30 @@ def set_color(obj, rgba):
     obj.color = rgba
     mat = bpy.data.materials.new(name=f"Szin_{obj.name}")
     mat.diffuse_color = rgba
-    mat.use_nodes = False
+    # Emisszios anyag: a megvilagitas ne tegye a keket/szurket szurkeseve,
+    # es egyik szin se hordozzon magassagra utalo arnyalatot.
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    nodes.clear()
+    emission = nodes.new('ShaderNodeEmission')
+    emission.inputs['Color'].default_value = rgba
+    emission.inputs['Strength'].default_value = 1.0
+    output = nodes.new('ShaderNodeOutputMaterial')
+    mat.node_tree.links.new(emission.outputs['Emission'], output.inputs['Surface'])
     obj.data.materials.clear()
     obj.data.materials.append(mat)
 
-set_color(bpy.data.objects.get("Csik_4_hajtott"), (0.90, 0.10, 0.10, 1.0))  # PIROS  (mozgo)
-set_color(bpy.data.objects.get("Csik_4_talp"),    (0.65, 0.06, 0.06, 1.0))  # sotetpiros
-set_color(bpy.data.objects.get("Csik_2"),         (0.10, 0.30, 0.90, 1.0))  # KEK    (ala bujik)
-set_color(bpy.data.objects.get("Csik_3_hajtott"), (0.10, 0.75, 0.20, 1.0))  # ZOLD   (masodik lehajlo szal)
-set_color(bpy.data.objects.get("Csik_3_talp"),    (0.06, 0.45, 0.12, 1.0))  # sotetzold talp
-set_color(bpy.data.objects.get("Csik_1"),         (0.80, 0.80, 0.80, 1.0))  # vilagosszurke
+RED   = (0.90, 0.10, 0.10, 1.0)
+BLUE  = (0.06, 0.32, 0.95, 1.0)
+GREEN = (0.10, 0.75, 0.20, 1.0)
+GRAY  = (0.72, 0.72, 0.72, 1.0)
+set_color(bpy.data.objects.get("Csik_4_hajtott"), RED)
+set_color(bpy.data.objects.get("Csik_4_talp"),    RED)
+set_color(bpy.data.objects.get("Csik_2"),         BLUE)
+set_color(bpy.data.objects.get("Csik_3_hajtott"), GREEN)
+set_color(bpy.data.objects.get("Csik_3_talp"),    GREEN)
+set_color(bpy.data.objects.get("Csik_1"),         GRAY)
+set_color(bpy.data.objects.get("To"),             GRAY)
 
 # A 3D viewport(ok) Solid-arnyalasa mutassa az OBJECT szineket.
 try:
@@ -853,7 +870,15 @@ def linearize(owner):
     action = getattr(getattr(owner, "animation_data", None), "action", None)
     if action is None:
         return
-    for curve in action.fcurves:
+    if hasattr(action, "fcurves"):
+        curves = action.fcurves
+    else:
+        # Blender >=5.x slotted actions: fcurves live in layered channelbags.
+        curves = [fcu for layer in getattr(action, "layers", [])
+                  for strip in getattr(layer, "strips", [])
+                  for cbag in getattr(strip, "channelbags", [])
+                  for fcu in getattr(cbag, "fcurves", [])]
+    for curve in curves:
         for point in curve.keyframe_points:
             point.interpolation = 'LINEAR'
 
@@ -863,19 +888,95 @@ def key_location(obj, frame, location):
     obj.keyframe_insert(data_path="location", frame=frame)
 
 
-def add_basket_weave_modifier(obj, phase):
-    """Subdivide and smoothly offset a thread through alternating crossings."""
+def add_black_outline(obj, material, width=0.035, lift=0.006):
+    """Add only the outer contour of a ribbon, never its internal mesh lines."""
+    if obj.type != 'MESH' or not obj.data.polygons:
+        return
+
+    # An edge used by one polygon is a genuine exterior edge.  This deliberately
+    # omits all tessellation/subdivision edges, which were read as height lines.
+    edge_use = {}
+    for poly in obj.data.polygons:
+        verts = poly.vertices[:]
+        for i, a in enumerate(verts):
+            edge = tuple(sorted((a, verts[(i + 1) % len(verts)])))
+            edge_use[edge] = edge_use.get(edge, 0) + 1
+    boundary = {edge for edge, count in edge_use.items() if count == 1}
+    if not boundary:
+        return
+
+    neighbours = {}
+    for a, b in boundary:
+        neighbours.setdefault(a, []).append(b)
+        neighbours.setdefault(b, []).append(a)
+
+    curve = bpy.data.curves.new(f"Kontur_{obj.name}", 'CURVE')
+    curve.dimensions = '3D'
+    curve.resolution_u = 1
+    curve.bevel_depth = width
+    curve.resolution_v = 0
+    curve.materials.append(material)
+    unused = set(boundary)
+    while unused:
+        edge = next(iter(unused))
+        start = next((v for v in edge if len(neighbours[v]) != 2), edge[0])
+        points = [start]
+        previous = None
+        current = start
+        closed = False
+        while True:
+            candidates = [v for v in neighbours[current]
+                          if tuple(sorted((current, v))) in unused and v != previous]
+            if not candidates:
+                break
+            following = candidates[0]
+            unused.remove(tuple(sorted((current, following))))
+            previous, current = current, following
+            if current == start:
+                closed = True
+                break
+            points.append(current)
+
+        if len(points) < 2:
+            continue
+        spline = curve.splines.new('POLY')
+        spline.points.add(len(points) - 1)
+        for point, index in zip(spline.points, points):
+            co = obj.data.vertices[index].co
+            point.co = (co.x, co.y, co.z + lift, 1.0)
+        spline.use_cyclic_u = closed
+
+    outline = bpy.data.objects.new(f"Kontur_{obj.name}", curve)
+    bpy.context.collection.objects.link(outline)
+    outline.color = (0.0, 0.0, 0.0, 1.0)
+    # The coordinates are in the source mesh's local system, so the contour
+    # follows its module/thread exactly during the assembly animation.
+    outline.parent = obj
+    outline.matrix_parent_inverse.identity()
+    outline.location = (0.0, 0.0, 0.0)
+    outline.rotation_euler = (0.0, 0.0, 0.0)
+    outline.scale = (1.0, 1.0, 1.0)
+
+
+def add_basket_weave_modifier(obj, phase, crossing_half_width=None):
+    """Subdivide and smoothly offset a thread through basket-weave crossings."""
+    if crossing_half_width is None:
+        crossing_half_width = CROSSING_HALF_WIDTH
+
     # The module group only translates, so this final-frame matrix gives a
-    # stable conversion from the object's local coordinates to the shared
-    # north-east weave direction and to global vertical height.
+    # stable conversion from the object's local coordinates to the direction
+    # ALONG the arriving (left-module) thread and to global vertical height.
+    # The wave must run along this direction: using the perpendicular
+    # north-east direction made it change layer through the middle of one
+    # crossing, so the right red strand appeared to pierce the left green.
     world = obj.matrix_world.copy()
     linear = world.to_3x3()
-    diagonal = Vector((
-        (linear[0][0] + linear[1][0]) / math.sqrt(2.0),
-        (linear[0][1] + linear[1][1]) / math.sqrt(2.0),
-        (linear[0][2] + linear[1][2]) / math.sqrt(2.0),
+    weave_axis = Vector((
+        (linear[0][0] - linear[1][0]) / math.sqrt(2.0),
+        (linear[0][1] - linear[1][1]) / math.sqrt(2.0),
+        (linear[0][2] - linear[1][2]) / math.sqrt(2.0),
     ))
-    diagonal_offset = (world.translation.x + world.translation.y) / math.sqrt(2.0)
+    weave_axis_offset = (world.translation.x - world.translation.y) / math.sqrt(2.0)
     local_up = linear.inverted() @ Vector((0.0, 0.0, 1.0))
     local_vertical = local_up * (BASKET_HEIGHT * phase)
     initial_local_lift = local_up * INITIAL_CLEARANCE
@@ -898,19 +999,33 @@ def add_basket_weave_modifier(obj, phase):
     subdivide.inputs['Level'].default_value = 4 if len(obj.data.vertices) <= 4 else 1
     position = nodes.new('GeometryNodeInputPosition')
     coeff = nodes.new('ShaderNodeCombineXYZ')
-    coeff.inputs['X'].default_value = diagonal.x
-    coeff.inputs['Y'].default_value = diagonal.y
-    coeff.inputs['Z'].default_value = diagonal.z
+    coeff.inputs['X'].default_value = weave_axis.x
+    coeff.inputs['Y'].default_value = weave_axis.y
+    coeff.inputs['Z'].default_value = weave_axis.z
     dot = nodes.new('ShaderNodeVectorMath')
     dot.operation = 'DOT_PRODUCT'
     offset = nodes.new('ShaderNodeMath')
     offset.operation = 'ADD'
-    offset.inputs[1].default_value = diagonal_offset
+    offset.inputs[1].default_value = weave_axis_offset
     scale = nodes.new('ShaderNodeMath')
     scale.operation = 'MULTIPLY'
     scale.inputs[1].default_value = math.pi / W
+    # Shift the sine into a cosine so a crossing centre is a height peak or
+    # trough, never the zero-height layer transition.
+    crossing_phase = nodes.new('ShaderNodeMath')
+    crossing_phase.operation = 'ADD'
+    crossing_phase.inputs[1].default_value = math.pi / 2.0
     sine = nodes.new('ShaderNodeMath')
     sine.operation = 'SINE'
+    # Keep broad, flat over/under plateaus at the crossings, with a continuous
+    # transition in the gap between them.  A hard switch would create visible
+    # vertical cross-lines through a continuous ribbon.
+    weave_profile = nodes.new('ShaderNodeMapRange')
+    weave_profile.clamp = True
+    weave_profile.inputs['From Min'].default_value = -0.35
+    weave_profile.inputs['From Max'].default_value = 0.35
+    weave_profile.inputs['To Min'].default_value = -1.0
+    weave_profile.inputs['To Max'].default_value = 1.0
     scene_time = nodes.new('GeometryNodeInputSceneTime')
     fade = nodes.new('ShaderNodeMapRange')
     fade.clamp = True
@@ -931,14 +1046,14 @@ def add_basket_weave_modifier(obj, phase):
     x_offset.inputs[1].default_value = world_x_offset
     x_lower = nodes.new('ShaderNodeMapRange')
     x_lower.clamp = True
-    x_lower.inputs['From Min'].default_value = -CROSSING_HALF_WIDTH - CROSSING_EDGE_FADE
-    x_lower.inputs['From Max'].default_value = -CROSSING_HALF_WIDTH + CROSSING_EDGE_FADE
+    x_lower.inputs['From Min'].default_value = -crossing_half_width - CROSSING_EDGE_FADE
+    x_lower.inputs['From Max'].default_value = -crossing_half_width + CROSSING_EDGE_FADE
     x_lower.inputs['To Min'].default_value = 0.0
     x_lower.inputs['To Max'].default_value = 1.0
     x_upper = nodes.new('ShaderNodeMapRange')
     x_upper.clamp = True
-    x_upper.inputs['From Min'].default_value = CROSSING_HALF_WIDTH - CROSSING_EDGE_FADE
-    x_upper.inputs['From Max'].default_value = CROSSING_HALF_WIDTH + CROSSING_EDGE_FADE
+    x_upper.inputs['From Min'].default_value = crossing_half_width - CROSSING_EDGE_FADE
+    x_upper.inputs['From Max'].default_value = crossing_half_width + CROSSING_EDGE_FADE
     x_upper.inputs['To Min'].default_value = 1.0
     x_upper.inputs['To Max'].default_value = 0.0
     crossing_window = nodes.new('ShaderNodeMath')
@@ -972,9 +1087,11 @@ def add_basket_weave_modifier(obj, phase):
     links.new(coeff.outputs['Vector'], dot.inputs[1])
     links.new(dot.outputs['Value'], offset.inputs[0])
     links.new(offset.outputs[0], scale.inputs[0])
-    links.new(scale.outputs[0], sine.inputs[0])
+    links.new(scale.outputs[0], crossing_phase.inputs[0])
+    links.new(crossing_phase.outputs[0], sine.inputs[0])
+    links.new(sine.outputs[0], weave_profile.inputs['Value'])
+    links.new(weave_profile.outputs['Result'], amplitude.inputs[0])
     links.new(scene_time.outputs['Frame'], fade.inputs['Value'])
-    links.new(sine.outputs[0], amplitude.inputs[0])
     links.new(fade.outputs['Result'], amplitude.inputs[1])
     links.new(position.outputs['Position'], x_dot.inputs[0])
     links.new(x_coeff.outputs['Vector'], x_dot.inputs[1])
@@ -998,6 +1115,139 @@ def add_basket_weave_modifier(obj, phase):
     links.new(set_position.outputs['Geometry'], group_out.inputs[0])
 
     modifier = obj.modifiers.new("Basket_weave", 'NODES')
+    modifier.node_group = node_group
+    return modifier
+
+
+def add_basket_crossing_caps(obj, phase):
+    """Create planar, alternating over/under segments without bending a ribbon."""
+    world = obj.matrix_world.copy()
+    linear = world.to_3x3()
+    local_up = linear.inverted() @ Vector((0.0, 0.0, 1.0))
+    weave_axis = Vector((
+        (linear[0][0] - linear[1][0]) / math.sqrt(2.0),
+        (linear[0][1] - linear[1][1]) / math.sqrt(2.0),
+        (linear[0][2] - linear[1][2]) / math.sqrt(2.0),
+    ))
+    weave_axis_offset = (world.translation.x - world.translation.y) / math.sqrt(2.0)
+    world_x = Vector((linear[0][0], linear[0][1], linear[0][2]))
+    world_x_offset = world.translation.x
+
+    node_group = bpy.data.node_groups.new(f"Basket_caps_{obj.name}", 'GeometryNodeTree')
+    if hasattr(node_group, "interface"):
+        node_group.interface.new_socket("Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
+        node_group.interface.new_socket("Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
+    else:
+        node_group.inputs.new('NodeSocketGeometry', "Geometry")
+        node_group.outputs.new('NodeSocketGeometry', "Geometry")
+
+    nodes = node_group.nodes
+    links = node_group.links
+    group_in = nodes.new('NodeGroupInput')
+    group_out = nodes.new('NodeGroupOutput')
+    subdivide = nodes.new('GeometryNodeSubdivideMesh')
+    subdivide.inputs['Level'].default_value = 4 if len(obj.data.vertices) <= 4 else 1
+    position = nodes.new('GeometryNodeInputPosition')
+
+    # Along-thread checkerboard parity: neighbouring crossings swap which
+    # ribbon receives the raised cap.
+    axis_coeff = nodes.new('ShaderNodeCombineXYZ')
+    axis_coeff.inputs['X'].default_value = weave_axis.x
+    axis_coeff.inputs['Y'].default_value = weave_axis.y
+    axis_coeff.inputs['Z'].default_value = weave_axis.z
+    axis_dot = nodes.new('ShaderNodeVectorMath'); axis_dot.operation = 'DOT_PRODUCT'
+    axis_offset = nodes.new('ShaderNodeMath'); axis_offset.operation = 'ADD'
+    axis_offset.inputs[1].default_value = weave_axis_offset
+    axis_scale = nodes.new('ShaderNodeMath'); axis_scale.operation = 'MULTIPLY'
+    axis_scale.inputs[1].default_value = math.pi / W
+    axis_phase = nodes.new('ShaderNodeMath'); axis_phase.operation = 'ADD'
+    axis_phase.inputs[1].default_value = math.pi / 2.0
+    axis_sine = nodes.new('ShaderNodeMath'); axis_sine.operation = 'SINE'
+    phase_sign = nodes.new('ShaderNodeMath'); phase_sign.operation = 'MULTIPLY'
+    phase_sign.inputs[1].default_value = phase
+    is_over = nodes.new('ShaderNodeMath'); is_over.operation = 'GREATER_THAN'
+
+    # Only create caps inside the central assembly overlap.  The original
+    # ribbon is retained as a flat lower layer everywhere else.
+    x_coeff = nodes.new('ShaderNodeCombineXYZ')
+    x_coeff.inputs['X'].default_value = world_x.x
+    x_coeff.inputs['Y'].default_value = world_x.y
+    x_coeff.inputs['Z'].default_value = world_x.z
+    x_dot = nodes.new('ShaderNodeVectorMath'); x_dot.operation = 'DOT_PRODUCT'
+    x_offset = nodes.new('ShaderNodeMath'); x_offset.operation = 'ADD'
+    x_offset.inputs[1].default_value = world_x_offset
+    x_lower = nodes.new('ShaderNodeMapRange'); x_lower.clamp = True
+    x_lower.inputs['From Min'].default_value = -CROSSING_HALF_WIDTH - CROSSING_EDGE_FADE
+    x_lower.inputs['From Max'].default_value = -CROSSING_HALF_WIDTH + CROSSING_EDGE_FADE
+    x_lower.inputs['To Min'].default_value = 0.0
+    x_lower.inputs['To Max'].default_value = 1.0
+    x_upper = nodes.new('ShaderNodeMapRange'); x_upper.clamp = True
+    x_upper.inputs['From Min'].default_value = CROSSING_HALF_WIDTH - CROSSING_EDGE_FADE
+    x_upper.inputs['From Max'].default_value = CROSSING_HALF_WIDTH + CROSSING_EDGE_FADE
+    x_upper.inputs['To Min'].default_value = 1.0
+    x_upper.inputs['To Max'].default_value = 0.0
+    in_window = nodes.new('ShaderNodeMath'); in_window.operation = 'MULTIPLY'
+    window_select = nodes.new('ShaderNodeMath'); window_select.operation = 'GREATER_THAN'
+    window_select.inputs[1].default_value = 0.5
+    cap_select = nodes.new('FunctionNodeBooleanMath'); cap_select.operation = 'AND'
+
+    separate = nodes.new('GeometryNodeSeparateGeometry')
+    base = nodes.new('GeometryNodeSetPosition')
+    cap = nodes.new('GeometryNodeSetPosition')
+    join = nodes.new('GeometryNodeJoinGeometry')
+    scene_time = nodes.new('GeometryNodeInputSceneTime')
+    fade = nodes.new('ShaderNodeMapRange'); fade.clamp = True
+    fade.inputs['From Min'].default_value = WEAVE_START
+    fade.inputs['From Max'].default_value = WEAVE_END
+    fade.inputs['To Min'].default_value = 0.0
+    fade.inputs['To Max'].default_value = 1.0
+    base_vector = nodes.new('ShaderNodeCombineXYZ')
+    base_vector.inputs['X'].default_value = -local_up.x * BASKET_HEIGHT
+    base_vector.inputs['Y'].default_value = -local_up.y * BASKET_HEIGHT
+    base_vector.inputs['Z'].default_value = -local_up.z * BASKET_HEIGHT
+    cap_vector = nodes.new('ShaderNodeCombineXYZ')
+    cap_vector.inputs['X'].default_value = local_up.x * BASKET_HEIGHT
+    cap_vector.inputs['Y'].default_value = local_up.y * BASKET_HEIGHT
+    cap_vector.inputs['Z'].default_value = local_up.z * BASKET_HEIGHT
+    base_scale = nodes.new('ShaderNodeVectorMath'); base_scale.operation = 'SCALE'
+    cap_scale = nodes.new('ShaderNodeVectorMath'); cap_scale.operation = 'SCALE'
+
+    L = links.new
+    L(group_in.outputs[0], subdivide.inputs['Mesh'])
+    L(position.outputs['Position'], axis_dot.inputs[0])
+    L(axis_coeff.outputs['Vector'], axis_dot.inputs[1])
+    L(axis_dot.outputs['Value'], axis_offset.inputs[0])
+    L(axis_offset.outputs[0], axis_scale.inputs[0])
+    L(axis_scale.outputs[0], axis_phase.inputs[0])
+    L(axis_phase.outputs[0], axis_sine.inputs[0])
+    L(axis_sine.outputs[0], phase_sign.inputs[0])
+    L(phase_sign.outputs[0], is_over.inputs[0])
+    L(position.outputs['Position'], x_dot.inputs[0])
+    L(x_coeff.outputs['Vector'], x_dot.inputs[1])
+    L(x_dot.outputs['Value'], x_offset.inputs[0])
+    L(x_offset.outputs[0], x_lower.inputs['Value'])
+    L(x_offset.outputs[0], x_upper.inputs['Value'])
+    L(x_lower.outputs['Result'], in_window.inputs[0])
+    L(x_upper.outputs['Result'], in_window.inputs[1])
+    L(in_window.outputs[0], window_select.inputs[0])
+    L(is_over.outputs[0], cap_select.inputs[0])
+    L(window_select.outputs[0], cap_select.inputs[1])
+    L(subdivide.outputs['Mesh'], separate.inputs['Geometry'])
+    L(cap_select.outputs[0], separate.inputs['Selection'])
+    L(subdivide.outputs['Mesh'], base.inputs['Geometry'])
+    L(separate.outputs['Selection'], cap.inputs['Geometry'])
+    L(scene_time.outputs['Frame'], fade.inputs['Value'])
+    L(base_vector.outputs['Vector'], base_scale.inputs['Vector'])
+    L(cap_vector.outputs['Vector'], cap_scale.inputs['Vector'])
+    L(fade.outputs['Result'], base_scale.inputs['Scale'])
+    L(fade.outputs['Result'], cap_scale.inputs['Scale'])
+    L(base_scale.outputs['Vector'], base.inputs['Offset'])
+    L(cap_scale.outputs['Vector'], cap.inputs['Offset'])
+    L(base.outputs['Geometry'], join.inputs['Geometry'])
+    L(cap.outputs['Geometry'], join.inputs['Geometry'])
+    L(join.outputs['Geometry'], group_out.inputs[0])
+
+    modifier = obj.modifiers.new("Basket_caps", 'NODES')
     modifier.node_group = node_group
 
 
@@ -1025,16 +1275,37 @@ freeze_final_meshes(module_2_objects)
 # -----------------------------------------------------------------------------
 W = 1.5
 ASSEMBLY_START = 1
-OVERLAP_FRAME = 36
-WEAVE_START = OVERLAP_FRAME
-WEAVE_END = 104
-ASSEMBLY_END = 114
+INTERLOCK_FRAME = 36
+# The ribbons first engage, then keep travelling through the crossings at the
+# speed of the original 36->95 full tighten.  The closing now STOPS at the
+# frame where the shrinking white square between the four crossing thread
+# bands ceases to exist (measured from the evaluated top-view geometry: the
+# enclosed empty area shrinks quadratically and reaches zero at frame 87);
+# moving past that point only over-tightened the already closed middle.
+TIGHTEN_FULL_END = 95            # original timing; defines the closing speed
+TIGHTEN_END = 87                 # the central white square vanishes here
+WEAVE_START = 20
+WEAVE_END = TIGHTEN_END
+ASSEMBLY_END = TIGHTEN_END
 MODULE_1_START_X = 48.0
-MODULE_1_FINAL_X = 20.0
+MODULE_1_INTERLOCK_X = 24.0
+# The two base margins would meet when the 12 cm stem length, already rotated
+# 45 degrees by the source module, contributes STEM_LEN / sqrt(2) in X.
+# The stop position is exactly TWO ribbon widths short of that contact,
+# measured along the 45-degree weave axis (W / sqrt(2) each in X): at this
+# distance the diagonal band lattices of the two modules register exactly --
+# band edges meet band edges, so the central white square closes to zero and
+# every crossing square is a full, cleanly bounded lattice cell.
+SOURCE_STEM_LEN = module_1_scope["STEM_LEN"]
+BASE_MARGIN_CONTACT_X = SOURCE_STEM_LEN / math.sqrt(2.0)
+MODULE_1_FINAL_X = BASE_MARGIN_CONTACT_X + 2.0 * W / math.sqrt(2.0)
 MODULE_2_START_X = -48.0
-MODULE_2_FINAL_X = -20.0
-INITIAL_CLEARANCE = 1.50
-BASKET_HEIGHT = 1.00
+MODULE_2_INTERLOCK_X = -24.0
+MODULE_2_FINAL_X = -MODULE_1_FINAL_X
+INITIAL_CLEARANCE = 0.0
+# This is only a depth-buffer separation.  The visible weave is defined by
+# clean coloured ribbons and their black contours, not by vertical waves.
+BASKET_HEIGHT = 0.10
 # Only the central overlap moves during the new basket weave.  Existing woven
 # portions of each imported module remain in their completed final form.
 CROSSING_HALF_WIDTH = 7.0
@@ -1058,31 +1329,77 @@ for tag, objects, module_group in (
         parent = thread_groups[tag, label] if label else module_group
         parent_keep_world(obj, parent)
 
-# At the beginning M2 is visibly the left-hand module.  By OVERLAP_FRAME its
-# threads meet M1; the basket modifier alone lifts that new crossing, leaving
-# both modules' existing woven parts rigid.
+# A single black material and outer contours make the occlusion order legible
+# without dark/light height shading on blue or gray ribbons.
+outline_material = bpy.data.materials.new("Fekete_kontur")
+outline_material.diffuse_color = (0.0, 0.0, 0.0, 1.0)
+outline_material.use_nodes = True
+outline_nodes = outline_material.node_tree.nodes
+outline_nodes.clear()
+outline_emission = outline_nodes.new('ShaderNodeEmission')
+outline_emission.inputs['Color'].default_value = (0.0, 0.0, 0.0, 1.0)
+outline_output = outline_nodes.new('ShaderNodeOutputMaterial')
+outline_material.node_tree.links.new(outline_emission.outputs['Emission'],
+                                     outline_output.inputs['Surface'])
+for objects in (module_1_objects, module_2_objects):
+    for obj in objects:
+        if obj.type == 'MESH':
+            add_black_outline(obj, outline_material)
+
+scene.world.color = (0.92, 0.92, 0.92)
+try:
+    for area in bpy.context.screen.areas:
+        if area.type == 'VIEW_3D':
+            for space in area.spaces:
+                if space.type == 'VIEW_3D':
+                    space.shading.background_type = 'WORLD'
+except Exception:
+    pass
+
+# M2 begins visibly on the left.  At INTERLOCK_FRAME the new crossings are
+# engaged; the module bases then continue to their final registered positions.
 key_location(module_1_group, ASSEMBLY_START, (MODULE_1_START_X, 0.0, 0.0))
-key_location(module_1_group, OVERLAP_FRAME, (MODULE_1_FINAL_X, 0.0, 0.0))
-key_location(module_1_group, ASSEMBLY_END, (MODULE_1_FINAL_X, 0.0, 0.0))
+key_location(module_1_group, INTERLOCK_FRAME, (MODULE_1_INTERLOCK_X, 0.0, 0.0))
+key_location(module_1_group, TIGHTEN_END, (MODULE_1_FINAL_X, 0.0, 0.0))
 
 key_location(module_2_group, ASSEMBLY_START, (MODULE_2_START_X, 0.0, 0.0))
-key_location(module_2_group, OVERLAP_FRAME, (MODULE_2_FINAL_X, 0.0, 0.0))
-key_location(module_2_group, WEAVE_END, (MODULE_2_FINAL_X, 0.0, 0.0))
-key_location(module_2_group, ASSEMBLY_END, (MODULE_2_FINAL_X, 0.0, 0.0))
+key_location(module_2_group, INTERLOCK_FRAME, (MODULE_2_INTERLOCK_X, 0.0, 0.0))
+key_location(module_2_group, TIGHTEN_END, (MODULE_2_FINAL_X, 0.0, 0.0))
 linearize(module_1_group)
 linearize(module_2_group)
+
+# The coloured threads no longer slide relative to their own module.  The
+# earlier extra tighten slide translated the blue/green/red groups sideways
+# off their bases (the gray thread and the base stayed put), so the ribbon
+# roots visibly detached -- the assembly seemed to fall apart at the end.
+# Stopping the closing exactly when the central white square vanishes makes
+# that slide unnecessary: each module now travels as one rigid piece.
 
 # Evaluate the aligned final transforms before deriving the local-to-world
 # crossing window for each thread modifier.
 scene.frame_set(WEAVE_END)
 bpy.context.view_layer.update()
 
-# Alternate the left module's four colored threads, producing a basket weave
-# over the perpendicular threads of the right module.
-for label, phase in (("gray", -1.0), ("blue", 1.0), ("green", -1.0), ("red", 1.0)):
+# Phase assignment for the central basket weave.  The column profile already
+# flips sign between neighbouring lattice columns, so the two LONG threads
+# (gray, blue) must share ONE phase: that alone alternates them over/under
+# across the crossings.  The two crossing tails (green, red) take the
+# OPPOSITE phase, which guarantees that at every crossing between two ribbons
+# of the same module the lifts point apart (never equal).  With the old
+# alternating signs (gray -1, blue +1, green -1, red +1) a tail got exactly
+# the same lift as the long thread it crossed, the two ribbons ended up
+# coplanar, and each such crossing square flickered with BOTH colours
+# instead of showing only the covering thread.
+# The black contour curves receive the same node group, so the outlines
+# follow their ribbon through the lift instead of poking through neighbours.
+for label, phase in (("gray", -1.0), ("blue", -1.0), ("green", 1.0), ("red", 1.0)):
     for obj in module_2_objects:
         if obj.type == 'MESH' and thread_label(obj.name, "M2") == label:
-            add_basket_weave_modifier(obj, phase)
+            modifier = add_basket_weave_modifier(obj, phase)
+            for child in obj.children:
+                if child.name.startswith("Kontur_"):
+                    child_modifier = child.modifiers.new("Basket_weave", 'NODES')
+                    child_modifier.node_group = modifier.node_group
 
 scene.frame_start = ASSEMBLY_START
 scene.frame_end = ASSEMBLY_END
@@ -1090,5 +1407,7 @@ scene.frame_set(ASSEMBLY_START)
 
 print(
     "Assembly ready: M2 enters from the left; only the new central crossing "
-    "settles into an alternating under-over-under basket weave (frames 36-104)."
+    "develops an alternating under-over-under basket weave while the threads "
+    f"engage and tighten (frames 1-{ASSEMBLY_END}); the closing stops when "
+    "the central white square vanishes."
 )
