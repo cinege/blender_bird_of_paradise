@@ -698,7 +698,7 @@ _set_action_linear(g_hinge)
 #   Csik_4 (mozgo, lehajtott szal) = PIROS
 #   Csik_2 (2. szal, amely ALA bujik a mozgo szal)   = KEK
 #   Csik_3 (3. szal, amely FOLE megy a mozgo szal)    = ZOLD
-#   Csik_1 = vilagosszurke,  To = szurke
+#   Csik_1 = barna,  To = szurke
 # Beallitjuk a viewport arnyalast is OBJECT-szinre, hogy Solid modban is
 # lassanak a szinek (nem kell kezzel semmit atallitani).
 # ==========================================================
@@ -717,7 +717,7 @@ set_color(bpy.data.objects.get("Csik_4_talp"),    (0.65, 0.06, 0.06, 1.0))  # so
 set_color(bpy.data.objects.get("Csik_2"),         (0.10, 0.30, 0.90, 1.0))  # KEK    (ala bujik)
 set_color(bpy.data.objects.get("Csik_3_hajtott"), (0.10, 0.75, 0.20, 1.0))  # ZOLD   (masodik lehajlo szal)
 set_color(bpy.data.objects.get("Csik_3_talp"),    (0.06, 0.45, 0.12, 1.0))  # sotetzold talp
-set_color(bpy.data.objects.get("Csik_1"),         (0.80, 0.80, 0.80, 1.0))  # vilagosszurke
+set_color(bpy.data.objects.get("Csik_1"),         (0.43, 0.23, 0.10, 1.0))  # BARNA
 
 # A 3D viewport(ok) Solid-arnyalasa mutassa az OBJECT szineket.
 try:

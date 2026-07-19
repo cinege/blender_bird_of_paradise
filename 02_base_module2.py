@@ -695,10 +695,10 @@ _set_action_linear(g_hinge)
 
 # ==========================================================
 # DEBUG SZINEZES: a retegzodes (ala/fole) SZEMMEL lathato legyen.
-#   Csik_4 (mozgo, lehajtott szal) = PIROS
-#   Csik_2 (2. szal, amely ALA bujik a mozgo szal)   = KEK
-#   Csik_3 (3. szal, amely FOLE megy a mozgo szal)    = ZOLD
-#   Csik_1 = vilagosszurke,  To = szurke
+#   Csik_4 (mozgo, lehajtott szal) = LILA
+#   Csik_2 (2. szal, amely ALA bujik a mozgo szal)   = FEKETE
+#   Csik_3 (3. szal, amely FOLE megy a mozgo szal)    = NARANCS
+#   Csik_1 = bezs,  To = szurke
 # Beallitjuk a viewport arnyalast is OBJECT-szinre, hogy Solid modban is
 # lassanak a szinek (nem kell kezzel semmit atallitani).
 # ==========================================================
@@ -712,12 +712,12 @@ def set_color(obj, rgba):
     obj.data.materials.clear()
     obj.data.materials.append(mat)
 
-set_color(bpy.data.objects.get("Csik_4_hajtott"), (0.90, 0.10, 0.10, 1.0))  # PIROS  (mozgo)
-set_color(bpy.data.objects.get("Csik_4_talp"),    (0.65, 0.06, 0.06, 1.0))  # sotetpiros
-set_color(bpy.data.objects.get("Csik_2"),         (0.10, 0.30, 0.90, 1.0))  # KEK    (ala bujik)
-set_color(bpy.data.objects.get("Csik_3_hajtott"), (0.10, 0.75, 0.20, 1.0))  # ZOLD   (masodik lehajlo szal)
-set_color(bpy.data.objects.get("Csik_3_talp"),    (0.06, 0.45, 0.12, 1.0))  # sotetzold talp
-set_color(bpy.data.objects.get("Csik_1"),         (0.80, 0.80, 0.80, 1.0))  # vilagosszurke
+set_color(bpy.data.objects.get("Csik_4_hajtott"), (0.55, 0.12, 0.85, 1.0))  # LILA  (mozgo)
+set_color(bpy.data.objects.get("Csik_4_talp"),    (0.35, 0.06, 0.55, 1.0))  # sotetlila
+set_color(bpy.data.objects.get("Csik_2"),         (0.01, 0.01, 0.01, 1.0))  # FEKETE (ala bujik)
+set_color(bpy.data.objects.get("Csik_3_hajtott"), (1.00, 0.45, 0.05, 1.0))  # NARANCS (masodik lehajlo szal)
+set_color(bpy.data.objects.get("Csik_3_talp"),    (0.65, 0.25, 0.02, 1.0))  # sotetnarancs talp
+set_color(bpy.data.objects.get("Csik_1"),         (0.74, 0.64, 0.48, 1.0))  # bezs
 
 # A 3D viewport(ok) Solid-arnyalasa mutassa az OBJECT szineket.
 try:
