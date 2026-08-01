@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(blender --version)",
+      "Read(//opt/**)",
+      "Read(//home/nt/**)",
+      "Bash(command -v flatpak)",
+      "Bash(flatpak list *)",
+      "Bash(command -v snap)",
+      "Bash(snap list *)",
+      "Bash(python3 -m py_compile /home/nt/sajat/data/prg/git/blender_bird_of_paradise/03_assemble_modules.py)",
+      "Bash(pip3 --version)",
+      "Bash(pip index *)",
+      "Bash(pip install *)",
+      "Bash(python3 -m venv /tmp/claude-1000/-home-nt-sajat-data-prg-git-blender-bird-of-paradise/3778f279-5304-4378-9efe-724b44094b4c/scratchpad/bpyenv)",
+      "Bash(/tmp/claude-1000/-home-nt-sajat-data-prg-git-blender-bird-of-paradise/3778f279-5304-4378-9efe-724b44094b4c/scratchpad/bpyenv/bin/pip install *)",
+      "Bash(/tmp/claude-1000/-home-nt-sajat-data-prg-git-blender-bird-of-paradise/3778f279-5304-4378-9efe-724b44094b4c/scratchpad/bpyenv/bin/python -c \"import bpy; print\\(bpy.app.version_string\\)\")",
+      "Bash(PYTHONPATH=/tmp/claude-1000/-home-nt-sajat-data-prg-git-blender-bird-of-paradise/3778f279-5304-4378-9efe-724b44094b4c/scratchpad/bpylib python3 -c \"import bpy; print\\(bpy.app.version_string\\)\")",
+      "Bash(PYTHONPATH=/tmp/claude-1000/-home-nt-sajat-data-prg-git-blender-bird-of-paradise/3778f279-5304-4378-9efe-724b44094b4c/scratchpad/bpylib python3 verify_weave.py)",
+      "Bash(python3 -)",
+      "Bash(python3 -m py_compile /home/nt/sajat/data/prg/git/blender_bird_of_paradise/01_base_module1.py /home/nt/sajat/data/prg/git/blender_bird_of_paradise/02_base_module2.py /home/nt/sajat/data/prg/git/blender_bird_of_paradise/paradicsommadar_fixed.py)",
+      "Bash(curl -s https://pypi.org/pypi/bpy/json)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(sorted\\(d['releases'].keys\\(\\)\\)\\)\")"
+    ]
+  }
+}
