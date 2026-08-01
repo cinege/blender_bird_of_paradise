@@ -1385,12 +1385,11 @@ INTRA_MODULE_WEAVE_RULES = [
 ]
 
 # The eight returning halves lie on the same eight lanes, so they cross at the
-# same sixteen points, TAIL_RISE higher up.  The order there is the base
-# model's, INVERTED: every ribbon is upside down after its turn, which is
-# exactly what turning a weave over does to its over/under pattern.  Inverting
-# a checkerboard leaves a checkerboard, so the raised weave alternates just
-# like the one below it.
-AERIAL_WEAVE_RULES = [(name, under_name, top_name) for name, top_name, under_name
+# same sixteen points, TAIL_RISE higher up.  The order there REPEATS the base
+# model's: at every one of the sixteen crossings the ribbon that is on top
+# below is on top up here too.  (Taking the returns as turned-over material and
+# inverting the pattern also alternates, but it is not the weave wanted here.)
+AERIAL_WEAVE_RULES = [(name, top_name, under_name) for name, top_name, under_name
                       in INTRA_MODULE_WEAVE_RULES + ASSEMBLY_WEAVE_RULES]
 aerial_weave_caps = add_weave_caps(AERIAL_WEAVE_RULES, outline_material,
                                    body_root, lanes, elevation=TAIL_RISE,
